@@ -212,6 +212,162 @@ function clockControlX(index) {
 var clockGridHeight = clockWeeks * clockRowHeight;
 var clockHeight = clockGridY + clockGridHeight + clockPadBottom;
 
+// ---------------------------------------------------------------------------
+// Settings island: the third section panel, in the same socket
+// ---------------------------------------------------------------------------
+//
+// Four sections along the top and one pane below them. The tabs are the menu's
+// own row of tiles at a smaller scale, and each tab's icon is the setting's
+// state indicator as well as its name: the row says what is on without the
+// pane having to be opened.
+var settingsWidth = dockWidth;
+var settingsRadius = dockRadius;
+
+var settingsPadX = 24;
+var settingsPadTop = 22;
+var settingsPadBottom = 22;
+
+var settingsTabs = 5;
+var settingsTabIconSize = 20;
+var settingsTabIconY = settingsPadTop + 11;
+var settingsTabLabelY = settingsTabIconY + 20;
+// The rule the tabs stand on, and the tick that ties the chosen one to the
+// pane -- the menu's drop lines, pointing the other way.
+var settingsRuleY = settingsTabLabelY + 16;
+var settingsDropLen = 12;
+// Longest caption, so every tab is written at the same rate.
+var settingsTabChars = 9;
+
+// The pane: one header line, then a list. Every section that has more than a
+// switch has a list of things to act on -- networks, devices, arrivals -- so
+// the pane is that shape once and each section fills it.
+var settingsPaneY = settingsRuleY + 14;
+var settingsRowHeight = 30;
+var settingsTitleChars = 14;
+var settingsDetailChars = 24;
+
+var settingsListY = settingsPaneY + settingsRowHeight + 8;
+var settingsListRows = 6;
+var settingsListRowHeight = 30;
+
+// Inside one list row: a state mark, an optional image, the name, an optional
+// level, a note. An arrival that carries a picture of its sender is the only
+// thing here that is not line work, and it earns its place: a Discord message
+// is its avatar long before it is its text.
+var settingsMarkX = settingsPadX + 5;
+var settingsRowTextX = settingsPadX + 20;
+var settingsRowImageX = settingsPadX + 20;
+var settingsRowImageSize = 20;
+var settingsRowImageRadius = 5;
+var settingsRowImageTextX = settingsRowImageX + settingsRowImageSize + 10;
+
+// The mark that throws one arrival away, at the end of its own row, and the
+// room it takes from the note beside it.
+var settingsCloseSize = 12;
+// Kept clear of the paging column beside it: the two hit boxes must not
+// overlap, or aiming at one row's dismiss mark would page the list instead.
+var settingsCloseHit = 18;
+var settingsCloseX = settingsWidth - settingsPadX - 4 - settingsCloseSize / 2;
+var settingsCloseGutter = settingsCloseSize + 16;
+
+// The list's paging column, in the margin at the right: a mark to step up, a
+// mark to step down, and a dot per page-worth between them. A wheel does the
+// same job, but only for a pointer that has one.
+var settingsScrollX = settingsWidth - 13;
+var settingsScrollHit = 16;
+var settingsGaugeWidth = 56;
+var settingsNoteWidth = 78;
+var settingsRowChars = 22;
+
+// The power section has no list; its three marks sit where one would start.
+var settingsSelectorY = settingsListY + 26;
+var settingsSelectorLabelY = settingsSelectorY + 12;
+
+function settingsListRowY(index) {
+    return settingsListY + index * settingsListRowHeight;
+}
+
+var settingsListHeight = settingsListRows * settingsListRowHeight;
+var settingsScrollUpY = settingsListY + 13;
+var settingsScrollDownY = settingsListY + settingsListHeight - 13;
+
+// The section shown when the panel opens, and the one that has no switch of
+// its own besides the power selector.
+var settingsNotifyPage = 3;
+var settingsWallPage = 4;
+
+// ---------------------------------------------------------------------------
+// Wallpaper
+// ---------------------------------------------------------------------------
+//
+// Relative to the home directory, because a `.pragma library` has no way to
+// ask what that is. The first of the two that has pictures in it is the
+// default; the stored state overrides both.
+var wallpaperDir = "Pictures/wallpaper";
+var wallpaperDirAlt = "Pictures/wallpapers";
+var wallpaperTypes = ["*.png", "*.jpg", "*.jpeg", "*.webp", "*.avif",
+                      "*.bmp", "*.jxl"];
+// What shows through where a picture does not cover the output, and between
+// two pictures while they trade places.
+var wallpaperGround = "#0b0f16";
+var wallpaperFadeMs = 420;
+
+// A switch, drawn: a stadium with a plotted point in it.
+var switchWidth = 34;
+var switchHeight = 16;
+var switchKnob = 4.5;
+var switchInset = 8;
+
+// Centre of one tab, and top of one pane row, from the island's left/top.
+function settingsTabX(index) {
+    return settingsPadX + (settingsWidth - settingsPadX * 2)
+        * (index + 0.5) / settingsTabs;
+}
+
+var settingsHeight = settingsListY + settingsListRows * settingsListRowHeight
+    + settingsPadBottom;
+
+// ---------------------------------------------------------------------------
+// Toast island: an arriving notification, in the same socket
+// ---------------------------------------------------------------------------
+//
+// A notification is not a section, but it belongs in the same place: it is
+// extruded out of the resting pill the way a panel is extruded out of the
+// menu, which is the whole point of a bar shaped like this. It is narrower
+// than the panels because it comes out of the pill rather than out of the
+// menu, and it only ever appears while the menu is closed -- with the menu
+// open the socket is already spoken for, and the notification is one row of a
+// list the settings panel is showing anyway.
+var toastWidth = 360;
+var toastRadius = 26;
+var toastPadX = 20;
+var toastPadTop = 16;
+var toastPadBottom = 16;
+
+var toastHeaderY = toastPadTop + 6;
+var toastRuleY = toastHeaderY + 14;
+
+// Below the rule: the sender's picture, if it sent one, and what it said.
+var toastContentY = toastRuleY + 12;
+var toastImageSize = 40;
+var toastImageRadius = 10;
+var toastTextGap = 12;
+var toastSummaryHeight = 16;
+var toastBodyLines = 2;
+var toastBodyLeading = 14;
+var toastContentHeight = Math.max(
+    toastImageSize, toastSummaryHeight + 2 + toastBodyLines * toastBodyLeading);
+
+var toastAppChars = 14;
+var toastTimeChars = 5;
+var toastSummaryChars = 26;
+
+// How long a toast is held when the sender does not say. A sender that does
+// say is obeyed; a critical one is never taken away on a timer.
+var toastHoldMs = 5200;
+
+var toastHeight = toastContentY + toastContentHeight + toastPadBottom;
+
 // Context menu, drawn in the same vocabulary as the bar. It is a popup, not
 // part of the layer, so the compositor's island glass does not reach it and it
 // has to carry its own ground. Its alpha must also clear ShojiWM's popup-blur
@@ -245,8 +401,12 @@ var menuRadiusPopup = 14;
 var surfaceWidth = menuWidth + surfacePad * 2;
 // Sized for the taller of the two lower islands, since they share the socket
 // and the surface itself is never resized.
-var lowerIslandHeight = Math.max(dockHeight, launcherHeight, clockHeight);
-var surfaceHeight = screenPad + menuHeight + dockGap + lowerIslandHeight + surfacePad;
+var lowerIslandHeight = Math.max(dockHeight, launcherHeight, clockHeight,
+                                 settingsHeight);
+// An arrival appears below whatever the socket is showing, never instead of
+// it, so the surface has to hold the tallest panel and a toast underneath it.
+var surfaceHeight = screenPad + menuHeight + dockGap + lowerIslandHeight
+    + dockGap + toastHeight + surfacePad;
 
 // ---------------------------------------------------------------------------
 // Material
@@ -510,6 +670,15 @@ var drawUndrawRatio = 0.18;
 // is doing the drawing.
 var tickLead = 0.07;
 
+// How far a mark sitting at `pos` along a stroke has resolved, given how much
+// of the stroke is drawn. The positions are scaled by (1 - tickLead) so the
+// mark at the very end still completes: keyed to `pos` alone its window would
+// run past the end of the stroke, and the last tick of every axis would sit at
+// zero forever.
+function tickReached(draw, pos) {
+    return clamp01((draw - pos * (1 - tickLead)) / tickLead);
+}
+
 // When a stage starts, after the lead-in and its own column's trail.
 function stageStart(stage, index) {
     return drawLeadInMs + stage.at
@@ -668,6 +837,109 @@ var durClockUndraw = Math.round(durClockDraw * drawUndrawRatio);
 function clockPhase(t, stage, index) {
     var at = clockStageStart(stage, index);
     return remap(t * clockScheduleMs, at, at + stage.ms);
+}
+
+// ----- the settings panel's pen schedules -----------------------------------
+//
+// Two drivers, not one. The tabs and the rule they stand on are drawn once,
+// when the panel arrives; the pane below is drawn again every time a different
+// section is chosen, and a section swap must not redraw the tabs that did the
+// choosing.
+
+var settingsLeadInMs = 100;
+var settingsTabStepMs = 70;
+
+var drawSettingsIcon = { at: 0, ms: 260, stagger: true };
+var drawSettingsLabel = { at: 160, ms: typeMs(settingsTabChars), stagger: true };
+var drawSettingsRule = { at: 360, ms: 520 };
+var drawSettingsDrop = { at: 760, ms: 220 };
+
+function settingsStageStart(stage, index) {
+    return settingsLeadInMs + stage.at
+        + (stage.stagger ? (index || 0) * settingsTabStepMs : 0);
+}
+
+function settingsStageEnd(stage) {
+    return settingsStageStart(stage, settingsTabs - 1) + stage.ms;
+}
+
+var settingsScheduleMs = Math.max(
+    settingsStageEnd(drawSettingsIcon), settingsStageEnd(drawSettingsLabel),
+    settingsStageEnd(drawSettingsRule), settingsStageEnd(drawSettingsDrop));
+
+var durSettingsDraw = Math.round(settingsScheduleMs * drawTempo);
+var durSettingsUndraw = Math.round(durSettingsDraw * drawUndrawRatio);
+
+function settingsPhase(t, stage, index) {
+    var at = settingsStageStart(stage, index);
+    return remap(t * settingsScheduleMs, at, at + stage.ms);
+}
+
+// The pane's own schedule, on its own driver. The list is plotted row by row,
+// the way the launcher's results and the clock's weeks are.
+var settingsRowStepMs = 55;
+
+var drawPaneTitle = { at: 0, ms: typeMs(settingsTitleChars) };
+var drawPaneControl = { at: 140, ms: 300 };
+var drawPaneRule = { at: 200, ms: 480 };
+var drawPaneDetail = { at: 380, ms: typeMs(settingsDetailChars) };
+var drawPaneRow = { at: 300, ms: 300, stagger: true };
+
+function paneStageEnd(stage) {
+    return stage.at + stage.ms
+        + (stage.stagger ? (settingsListRows - 1) * settingsRowStepMs : 0);
+}
+
+var paneScheduleMs = Math.max(
+    paneStageEnd(drawPaneTitle), paneStageEnd(drawPaneControl),
+    paneStageEnd(drawPaneRule), paneStageEnd(drawPaneDetail),
+    paneStageEnd(drawPaneRow));
+
+var durSettingsPaneDraw = Math.round(paneScheduleMs * drawTempo);
+var durSettingsPaneUndraw = Math.round(durSettingsPaneDraw * drawUndrawRatio);
+
+// How long after the panel starts drawing the first pane begins, so the rule
+// the pane hangs from is already most of the way across. Expressed on the
+// pen's clock and converted, because the two run at different rates.
+var settingsPaneLeadMs = Math.round(
+    (settingsLeadInMs + drawSettingsRule.at + drawSettingsRule.ms * 0.5) * drawTempo);
+
+function panePhase(t, stage, index) {
+    var at = stage.at
+        + (stage.stagger ? (index || 0) * settingsRowStepMs : 0);
+    return remap(t * paneScheduleMs, at, at + stage.ms);
+}
+
+// ----- the toast's pen schedule ---------------------------------------------
+//
+// Shorter than a panel's, because a toast is read in the time it is on screen
+// rather than opened and studied. The body only fades: it is a paragraph, and
+// typing one at the rate the rest of the bar writes would outlast the toast.
+
+var toastLeadInMs = 60;
+
+var drawToastApp = { at: 0, ms: typeMs(toastAppChars) };
+var drawToastTime = { at: 80, ms: typeMs(toastTimeChars) };
+var drawToastRule = { at: 120, ms: 420 };
+var drawToastSummary = { at: 240, ms: typeMs(toastSummaryChars) };
+var drawToastBody = { at: 420, ms: 320 };
+// The picture is not pen work, so it only fades, and it lands with the line
+// that introduces it.
+var drawToastImage = { at: 200, ms: 300 };
+
+var toastScheduleMs = toastLeadInMs + Math.max(
+    drawToastApp.at + drawToastApp.ms, drawToastTime.at + drawToastTime.ms,
+    drawToastRule.at + drawToastRule.ms,
+    drawToastSummary.at + drawToastSummary.ms,
+    drawToastBody.at + drawToastBody.ms,
+    drawToastImage.at + drawToastImage.ms);
+
+var durToastDraw = Math.round(toastScheduleMs * drawTempo);
+var durToastUndraw = Math.round(durToastDraw * drawUndrawRatio);
+
+function toastPhase(t, stage) {
+    var at = toastLeadInMs + stage.at;
+    return remap(t * toastScheduleMs, at, at + stage.ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -864,6 +1136,8 @@ function roundedRectPath(w, h, r, progress) {
         launcherHeight: launcherHeight,
         lowerIslandHeight: lowerIslandHeight,
         clockHeight: clockHeight,
+        settingsHeight: settingsHeight,
+        toastHeight: toastHeight,
         socketEmergeMs: socketEmergeMs,
         socketRetractMs: socketRetractMs,
         socketAdmitMs: socketAdmitMs,
@@ -876,7 +1150,17 @@ function roundedRectPath(w, h, r, progress) {
         wheelNotch: wheelNotch,
         clockScheduleMs: clockScheduleMs,
         durClockDraw: durClockDraw,
-        durClockUndraw: durClockUndraw
+        durClockUndraw: durClockUndraw,
+        settingsScheduleMs: settingsScheduleMs,
+        durSettingsDraw: durSettingsDraw,
+        durSettingsUndraw: durSettingsUndraw,
+        paneScheduleMs: paneScheduleMs,
+        durSettingsPaneDraw: durSettingsPaneDraw,
+        durSettingsPaneUndraw: durSettingsPaneUndraw,
+        settingsPaneLeadMs: settingsPaneLeadMs,
+        toastScheduleMs: toastScheduleMs,
+        durToastDraw: durToastDraw,
+        durToastUndraw: durToastUndraw
     };
 
     var stages = {
@@ -901,7 +1185,22 @@ function roundedRectPath(w, h, r, progress) {
         drawClockMonth: drawClockMonth,
         drawClockWeekdays: drawClockWeekdays,
         drawClockRow: drawClockRow,
-        drawClockToday: drawClockToday
+        drawClockToday: drawClockToday,
+        drawSettingsIcon: drawSettingsIcon,
+        drawSettingsLabel: drawSettingsLabel,
+        drawSettingsRule: drawSettingsRule,
+        drawSettingsDrop: drawSettingsDrop,
+        drawPaneTitle: drawPaneTitle,
+        drawPaneControl: drawPaneControl,
+        drawPaneRule: drawPaneRule,
+        drawPaneDetail: drawPaneDetail,
+        drawPaneRow: drawPaneRow,
+        drawToastApp: drawToastApp,
+        drawToastTime: drawToastTime,
+        drawToastRule: drawToastRule,
+        drawToastSummary: drawToastSummary,
+        drawToastBody: drawToastBody,
+        drawToastImage: drawToastImage
     };
 
     function broken(value) {

@@ -8,6 +8,40 @@ import "components"
 import "theme.js" as Theme
 
 ShellRoot {
+    // The wallpaper, on its own layer under everything. It is a picture, not
+    // an island: no glass, no input, no reserved space. It is a second layer
+    // only because a background and a bar cannot be the same surface -- the
+    // bar's one-layer rule is about the bar.
+    Variants {
+        model: Quickshell.screens
+
+        PanelWindow {
+            required property var modelData
+            screen: modelData
+
+            color: "transparent"
+            anchors.top: true
+            anchors.bottom: true
+            anchors.left: true
+            anchors.right: true
+
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Background
+            // ShojiWM routes a namespace it does not recognise through its
+            // behind-blur. There is nothing behind a wallpaper to blur.
+            WlrLayershell.namespace: "no_blur"
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+            // Empty: a wallpaper should not take a click away from whatever
+            // the compositor does with one.
+            mask: Region {}
+
+            WallpaperSurface {
+                anchors.fill: parent
+                source: WallpaperState.current
+            }
+        }
+    }
+
     Variants {
         model: Quickshell.screens
 
@@ -38,7 +72,7 @@ ShellRoot {
             // typing. ShojiWM hands focus to a layer the moment it asks for it
             // and gives it back the moment it stops, so this is also what
             // returns the keyboard to the window underneath.
-            WlrLayershell.keyboardFocus: bar.launcherOpen
+            WlrLayershell.keyboardFocus: bar.wantsKeyboard
                 ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
             // Constant. See theme.js: resizing a top-anchored layer surface
@@ -81,6 +115,22 @@ ShellRoot {
                     radius: Math.round(bar.clockR)
                 }
 
+                Region {
+                    x: Math.round(bar.settingsX)
+                    y: Math.round(bar.settingsY)
+                    width: Math.round(bar.settingsW)
+                    height: Math.round(bar.settingsH)
+                    radius: Math.round(bar.settingsR)
+                }
+
+                Region {
+                    x: Math.round(bar.toastX)
+                    y: Math.round(bar.toastY)
+                    width: Math.round(bar.toastW)
+                    height: Math.round(bar.toastH)
+                    radius: Math.round(bar.toastR)
+                }
+
                 // The neck between the islands draws as glass but is not part
                 // of either rounded box, and a hole in the input region reads
                 // to the client as "the pointer left the bar": crossing the
@@ -109,6 +159,24 @@ ShellRoot {
                     y: top
                     width: Math.round(bar.clockW)
                     height: Math.max(0, Math.round(bar.clockY) - top + 1)
+                }
+
+                Region {
+                    readonly property int top: Math.round(bar.blobY + bar.shapeH) - 1
+                    x: Math.round(bar.settingsX)
+                    y: top
+                    width: Math.round(bar.settingsW)
+                    height: Math.max(0, Math.round(bar.settingsY) - top + 1)
+                }
+
+                // The arrival hangs below whatever the socket is showing, so
+                // its neck starts at that edge rather than at the menu's.
+                Region {
+                    readonly property int top: Math.round(bar.socketBottom) - 1
+                    x: Math.round(bar.toastX)
+                    y: top
+                    width: Math.round(bar.toastW)
+                    height: Math.max(0, Math.round(bar.toastY) - top + 1)
                 }
             }
 

@@ -38,7 +38,7 @@ Item {
             required property int index
             readonly property bool major: index % 3 === 0
             readonly property real reached:
-                Theme.clamp01((axis.draw - index / axis.divisions) / Theme.tickLead)
+                Theme.tickReached(axis.draw, index / axis.divisions)
 
             x: Theme.snap(axis.width * index / axis.divisions - axis.hairline / 2,
                           Screen.devicePixelRatio)

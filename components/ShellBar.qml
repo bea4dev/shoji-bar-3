@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Services.SystemTray
+import ".."
 import "../theme.js" as Theme
 
 // The whole shell lives in one layer surface and one silhouette.
@@ -65,11 +66,23 @@ Item {
     property real launcherDraw: 0
     property real clock: 0
     property real clockDraw: 0
+    property real settings: 0
+    property real settingsDraw: 0
+    property real toast: 0
+    property real toastDraw: 0
+    // 1..0 over the toast's hold. The animation is the clock: when it finishes
+    // the toast is taken away, so pausing it on hover is all "hold while the
+    // pointer is here" has to mean.
+    property real toastLife: 1
+    // The settings panel's pane is drawn again every time another section of
+    // it is chosen, so it needs a driver the tabs do not share.
+    property real settingsPane: 0
 
     readonly property bool engaged: mode >= 1
     readonly property bool opened: mode >= 2
     readonly property bool launcherOpen: section === 0
     readonly property bool clockOpen: section === 1
+    readonly property bool settingsOpen: section === 2
 
     // ----- hover ------------------------------------------------------------
 
@@ -248,39 +261,209 @@ Item {
         }
     }
 
+    SequentialAnimation {
+        id: settingsIn
+        PauseAnimation { id: settingsInDelay }
+        ParallelAnimation {
+            NumberAnimation {
+                target: bar; property: "settings"; to: 1
+                duration: Theme.socketEmergeMs
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Theme.dockCurve
+            }
+            NumberAnimation {
+                target: bar; property: "settingsDraw"; to: 1
+                duration: Theme.durSettingsDraw
+                easing.type: Easing.Linear
+            }
+        }
+    }
+
+    ParallelAnimation {
+        id: settingsOut
+        NumberAnimation {
+            target: bar; property: "settings"; to: 0
+            duration: Theme.socketRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+        NumberAnimation {
+            target: bar; property: "settingsDraw"; to: 0
+            duration: Theme.durSettingsUndraw
+            easing.type: Easing.Linear
+        }
+        NumberAnimation {
+            target: bar; property: "settingsPane"; to: 0
+            duration: Theme.durSettingsPaneUndraw
+            easing.type: Easing.Linear
+        }
+    }
+
+    // The pane, redrawn on its own: once when the panel arrives, and again
+    // whenever a different section of it is chosen. Its delay is written
+    // rather than bound, for the reason given above.
+    SequentialAnimation {
+        id: settingsPaneIn
+        PauseAnimation { id: settingsPaneDelay }
+        NumberAnimation {
+            target: bar; property: "settingsPane"; to: 1
+            duration: Theme.durSettingsPaneDraw
+            easing.type: Easing.Linear
+        }
+    }
+
+    function drawSettingsPane(delayMs) {
+        settingsPaneIn.stop();
+        settingsPane = 0;
+        settingsPaneDelay.duration = delayMs;
+        settingsPaneIn.restart();
+    }
+
+    SequentialAnimation {
+        id: toastIn
+        PauseAnimation { id: toastInDelay }
+        ParallelAnimation {
+            NumberAnimation {
+                target: bar; property: "toast"; to: 1
+                duration: Theme.socketEmergeMs
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Theme.dockCurve
+            }
+            NumberAnimation {
+                target: bar; property: "toastDraw"; to: 1
+                duration: Theme.durToastDraw
+                easing.type: Easing.Linear
+            }
+        }
+    }
+
+    ParallelAnimation {
+        id: toastOut
+        NumberAnimation {
+            target: bar; property: "toast"; to: 0
+            duration: Theme.socketRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+        NumberAnimation {
+            target: bar; property: "toastDraw"; to: 0
+            duration: Theme.durToastUndraw
+            easing.type: Easing.Linear
+        }
+    }
+
+    NumberAnimation {
+        id: toastLifeOut
+        target: bar; property: "toastLife"; to: 0
+        easing.type: Easing.Linear
+        // Reaching the end is what dismisses; being stopped is not, or
+        // retracting the toast by hand would dismiss it twice.
+        onFinished: Notifications.dismissToast()
+    }
+
     // The socket, addressed by section index: -1 is the dock, 0 and up are the
-    // menu's tiles in order.
+    // menu's tiles in order. An arrival is not one of them -- it appears below
+    // whatever is in the socket rather than instead of it, so it has its own
+    // pair of animations and never takes the socket's place.
+    readonly property int socketNone: -2
+
+    // What is in the socket right now, so a swap knows what has to leave.
+    property int occupant: socketNone
     function islandIn(which) {
-        return which === 0 ? launcherIn : which === 1 ? clockIn : dockIn;
+        return which === 0 ? launcherIn : which === 1 ? clockIn
+            : which === 2 ? settingsIn : dockIn;
     }
 
     function islandInDelay(which) {
-        return which === 0 ? launcherInDelay
-            : which === 1 ? clockInDelay : dockInDelay;
+        return which === 0 ? launcherInDelay : which === 1 ? clockInDelay
+            : which === 2 ? settingsInDelay : dockInDelay;
     }
 
     function islandOut(which) {
-        return which === 0 ? launcherOut : which === 1 ? clockOut : dockOut;
+        return which === 0 ? launcherOut : which === 1 ? clockOut
+            : which === 2 ? settingsOut : dockOut;
     }
 
     function stopSocket() {
         dockIn.stop(); dockOut.stop();
         launcherIn.stop(); launcherOut.stop();
         clockIn.stop(); clockOut.stop();
+        settingsIn.stop(); settingsOut.stop(); settingsPaneIn.stop();
+    }
+
+    // Whatever is in the socket leaves and the next thing arrives. The same
+    // two calls whichever two islands are involved.
+    function swapSocket(next, delayMs) {
+        stopSocket();
+        if (occupant !== socketNone)
+            islandOut(occupant).restart();
+        occupant = next;
+        if (next !== socketNone)
+            fillSocket(next, delayMs);
     }
 
     // Written, not bound, and written before the animation is started.
     function fillSocket(which, delayMs) {
         islandInDelay(which).duration = delayMs;
         islandIn(which).restart();
+        // The pane trails the rule it hangs from, measured from the same
+        // instant the island starts moving.
+        if (which === 2)
+            drawSettingsPane(delayMs + Theme.settingsPaneLeadMs);
     }
 
     // Only one island is ever non-zero, so all of them are simply sent home
     // and whichever was showing is the one that reads as leaving.
     function emptySocket() {
+        occupant = socketNone;
         dockOut.restart();
         launcherOut.restart();
         clockOut.restart();
+        settingsOut.restart();
+    }
+
+    // ----- arrivals ---------------------------------------------------------
+    //
+    // An arrival is always shown, and always at the bottom: it appears under
+    // the resting pill when nothing else is open and under whatever panel the
+    // socket is holding when something is. It never replaces a panel, because
+    // it is not something the reader asked for and taking their place away to
+    // show it would be the wrong trade.
+
+    readonly property var toastItem: Notifications.toast
+
+    onToastItemChanged: {
+        toastIn.stop(); toastOut.stop();
+        startToastLife();
+        if (toastItem) {
+            // A second arrival redraws the same island rather than retracting
+            // it and pushing it out again.
+            toastDraw = 0;
+            toastInDelay.duration = 0;
+            toastIn.restart();
+        } else {
+            toastOut.restart();
+        }
+    }
+
+    function startToastLife() {
+        toastLifeOut.stop();
+        toastLife = 1;
+        var ms = Notifications.toastMs;
+        if (ms <= 0)
+            return;
+        // Written, not bound: a duration read one transition late would hold
+        // the next toast for as long as the last one asked for.
+        toastLifeOut.duration = ms;
+        toastLifeOut.restart();
+    }
+
+    // Hovering holds the arrival: the pointer is on its way to answering it.
+    function holdToast(hold) {
+        if (hold)
+            toastLifeOut.pause();
+        else if (toastLifeOut.paused)
+            toastLifeOut.resume();
     }
 
     NumberAnimation {
@@ -302,11 +485,11 @@ Item {
             closeTrayMenu();
 
         if (opened) {
-            menuOut.stop(); menuDrawOut.stop(); stopSocket();
+            menuOut.stop(); menuDrawOut.stop();
             menuIn.restart(); menuDrawIn.restart();
             // Which island the menu opens with. Everything but a keybinding
             // opens with the dock, because closing always resets the section.
-            fillSocket(section, Theme.dockStartMs);
+            swapSocket(section, Theme.dockStartMs);
         } else {
             menuIn.stop(); menuDrawIn.stop(); stopSocket();
             // The next opening starts from the state it always starts from.
@@ -317,7 +500,7 @@ Item {
 
     // A tile either owns a panel here or is still only a signal to the shell.
     function chooseSection(index) {
-        if (index > 1) {
+        if (index > 2) {
             sectionRequested(index);
             return;
         }
@@ -327,15 +510,15 @@ Item {
     function setSection(next) {
         if (section === next)
             return;
-        stopSocket();
         hit.wheelCarry = 0;
-        islandOut(section).restart();
         section = next;
         if (next === 0)
             launcherIsland.reset();
         else if (next === 1)
             clockIsland.reset();
-        fillSocket(next, Theme.socketAdmitMs);
+        else if (next === 2)
+            settingsIsland.reset();
+        swapSocket(next, Theme.socketAdmitMs);
     }
 
     // ----- external control -------------------------------------------------
@@ -452,13 +635,58 @@ Item {
     readonly property real clockContentX: clockX + (clockW - Theme.clockWidth) / 2
     readonly property real clockContentY: clockY + (clockH - Theme.clockHeight) / 2
 
-    // The lowest point anything currently reaches, which is what the pointer
-    // has to be able to travel over.
-    readonly property real lowerBottom: Math.max(
+    // ----- the settings island ----------------------------------------------
+
+    readonly property real settingsW: Theme.settingsWidth * settings
+    readonly property real settingsH: Theme.settingsHeight * settings
+    readonly property real settingsR: Theme.cornerRadius(
+        Theme.settingsRadius, settingsW, settingsH)
+    readonly property real settingsX: blobX + (shapeW - settingsW) / 2
+    readonly property real settingsCenterY: Theme.mix(
+        blobY + shapeH - Theme.dockEmergeDepth,
+        blobY + shapeH + Theme.dockGap + Theme.settingsHeight / 2,
+        settings)
+    readonly property real settingsY: settingsCenterY - settingsH / 2
+    readonly property bool settingsVisible: settings > 0.001
+
+    readonly property real settingsContentX:
+        settingsX + (settingsW - Theme.settingsWidth) / 2
+    readonly property real settingsContentY:
+        settingsY + (settingsH - Theme.settingsHeight) / 2
+
+    // ----- the toast island -------------------------------------------------
+    //
+    // Narrower than the panels, because it comes out of the shape above it
+    // rather than out of the menu, and always the last thing on the surface.
+
+    // The lowest edge the socket currently reaches, which is what an arrival
+    // is extruded from: the pill when the socket is empty, the panel when it
+    // is not. It moves while a panel grows, and the toast moves with it.
+    readonly property real socketBottom: Math.max(
         blobY + shapeH,
         dockVisible ? dockY + dockH : 0,
         launcherVisible ? launcherY + launcherH : 0,
-        clockVisible ? clockY + clockH : 0)
+        clockVisible ? clockY + clockH : 0,
+        settingsVisible ? settingsY + settingsH : 0)
+
+    readonly property real toastW: Theme.toastWidth * toast
+    readonly property real toastH: Theme.toastHeight * toast
+    readonly property real toastR: Theme.cornerRadius(Theme.toastRadius, toastW, toastH)
+    readonly property real toastX: blobX + (shapeW - toastW) / 2
+    readonly property real toastCenterY: Theme.mix(
+        socketBottom - Theme.dockEmergeDepth,
+        socketBottom + Theme.dockGap + Theme.toastHeight / 2,
+        toast)
+    readonly property real toastY: toastCenterY - toastH / 2
+    readonly property bool toastVisible: toast > 0.001
+
+    readonly property real toastContentX: toastX + (toastW - Theme.toastWidth) / 2
+    readonly property real toastContentY: toastY + (toastH - Theme.toastHeight) / 2
+
+    // The lowest point anything currently reaches, which is what the pointer
+    // has to be able to travel over.
+    readonly property real lowerBottom: Math.max(
+        socketBottom, toastVisible ? toastY + toastH : 0)
 
     readonly property var trayItems: SystemTray.items.values
 
@@ -490,6 +718,17 @@ Item {
         && Theme.launcherPhase(launcherDraw, Theme.drawLauncherRow, 0) > 0.5
     readonly property bool clockInteractive: clockVisible
         && Theme.clockPhase(clockDraw, Theme.drawClockMonth) > 0.5
+    readonly property bool settingsInteractive: settingsVisible
+        && Theme.settingsPhase(settingsDraw, Theme.drawSettingsLabel, 0) > 0.5
+    readonly property bool settingsPaneInteractive: settingsInteractive
+        && Theme.panePhase(settingsPane, Theme.drawPaneControl) > 0.5
+    readonly property bool settingsListInteractive: settingsInteractive
+        && Theme.panePhase(settingsPane, Theme.drawPaneRow, 0) > 0.5
+
+    // The passphrase prompt is the only thing outside the launcher that reads
+    // typing, so it is the other reason the layer asks for the keyboard.
+    readonly property bool wantsKeyboard:
+        launcherOpen || (settingsOpen && settingsIsland.prompting)
 
     // The headline readout's centre line. Named for the element rather than for
     // the clock, now that an island carries that name too.
@@ -582,6 +821,65 @@ Item {
                                      py - (clockContentY - blobY));
     }
 
+    // The settings tabs and whatever control the chosen section puts in its
+    // pane, hit-tested in the same coordinates as everything else.
+    function settingsTabAt(px, py) {
+        if (!settingsInteractive)
+            return -1;
+        return settingsIsland.tabAt(px - (settingsContentX - blobX),
+                                    py - (settingsContentY - blobY));
+    }
+
+    function settingsControlAt(px, py) {
+        if (!settingsPaneInteractive)
+            return -1;
+        return settingsIsland.controlAt(px - (settingsContentX - blobX),
+                                        py - (settingsContentY - blobY));
+    }
+
+    function settingsRowAt(px, py) {
+        if (!settingsListInteractive)
+            return -1;
+        return settingsIsland.rowAt(px - (settingsContentX - blobX),
+                                    py - (settingsContentY - blobY));
+    }
+
+    // The dismiss mark sits inside a row, so it has to be asked about first.
+    function settingsCloseAt(px, py) {
+        if (!settingsListInteractive)
+            return -1;
+        return settingsIsland.closeAt(px - (settingsContentX - blobX),
+                                      py - (settingsContentY - blobY));
+    }
+
+    function settingsScrollAt(px, py) {
+        if (!settingsListInteractive)
+            return -1;
+        return settingsIsland.scrollAt(px - (settingsContentX - blobX),
+                                       py - (settingsContentY - blobY));
+    }
+
+    // The panel takes the wheel over its list, the way the launcher does.
+    function overSettings(px, py) {
+        if (!settingsVisible)
+            return false;
+        var lx = px - (settingsContentX - blobX);
+        var ly = py - (settingsContentY - blobY);
+        return lx >= 0 && lx <= Theme.settingsWidth
+            && ly >= Theme.settingsListY && ly <= Theme.settingsHeight;
+    }
+
+    // An arriving notification is one target, not several: the whole island
+    // answers it.
+    function overToast(px, py) {
+        if (!toastVisible)
+            return false;
+        var lx = px - (toastContentX - blobX);
+        var ly = py - (toastContentY - blobY);
+        return lx >= 0 && lx <= Theme.toastWidth
+            && ly >= 0 && ly <= Theme.toastHeight;
+    }
+
     // The clock panel takes the wheel too, to page the month.
     function overClock(px, py) {
         if (!clockVisible)
@@ -645,16 +943,34 @@ Item {
         readonly property int hoverTray: containsMouse ? bar.trayAt(mouseX, mouseY) : -1
         readonly property int hoverRow: containsMouse ? bar.launcherRowAt(mouseX, mouseY) : -1
         readonly property int hoverControl: containsMouse ? bar.clockControlAt(mouseX, mouseY) : -1
+        readonly property int hoverTab: containsMouse ? bar.settingsTabAt(mouseX, mouseY) : -1
+        readonly property int hoverSetting: containsMouse ? bar.settingsControlAt(mouseX, mouseY) : -1
+        readonly property int hoverSettingRow: containsMouse ? bar.settingsRowAt(mouseX, mouseY) : -1
+        readonly property int hoverSettingClose: containsMouse ? bar.settingsCloseAt(mouseX, mouseY) : -1
+        readonly property int hoverSettingScroll: containsMouse ? bar.settingsScrollAt(mouseX, mouseY) : -1
+        readonly property bool hoverToast: containsMouse && bar.overToast(mouseX, mouseY)
+
+        onHoverToastChanged: bar.holdToast(hoverToast)
 
         // The cursor says which parts of the silhouette are actually pressable,
         // now that the rest of it swallows clicks.
         cursorShape: hoverColumn >= 0 || hoverTray >= 0 || hoverRow >= 0
-            || hoverControl >= 0 || bar.onHandle(mouseX, mouseY)
+            || hoverControl >= 0 || hoverTab >= 0 || hoverSetting >= 0
+            || hoverSettingRow >= 0 || hoverSettingScroll >= 0
+            || hoverToast || bar.onHandle(mouseX, mouseY)
             ? Qt.PointingHandCursor : Qt.ArrowCursor
 
+        // Hovering the bar itself is what opens the peek. The area also spans
+        // whatever island is below, and reaching for a toast should not make
+        // the pill widen under the pointer on the way.
         onEntered: {
             closeTimer.stop();
-            if (bar.mode === 0)
+            if (bar.mode === 0 && mouseY <= bar.shapeH)
+                bar.mode = 1;
+        }
+
+        onPositionChanged: (event) => {
+            if (bar.mode === 0 && event.y <= bar.shapeH)
                 bar.mode = 1;
         }
         // A single layer surface cannot see clicks outside itself, so leaving
@@ -678,8 +994,9 @@ Item {
         property real wheelCarry: 0
 
         onWheel: (event) => {
-            var overLauncher = bar.overLauncher(event.x, event.y);
-            if (!overLauncher && !bar.overClock(event.x, event.y)) {
+            var onLauncher = bar.overLauncher(event.x, event.y);
+            var onSettings = !onLauncher && bar.overSettings(event.x, event.y);
+            if (!onLauncher && !onSettings && !bar.overClock(event.x, event.y)) {
                 event.accepted = false;
                 return;
             }
@@ -690,16 +1007,46 @@ Item {
             if (steps === 0)
                 return;
             wheelCarry -= steps;
-            if (overLauncher)
+            if (onLauncher)
                 launcherIsland.scrollBy(-steps);
+            else if (onSettings)
+                settingsIsland.scrollBy(-steps);
             else
                 clockIsland.page(-steps);
         }
 
         onClicked: (event) => {
+            // The arrival answers first: it is the thing that just interrupted.
+            if (bar.overToast(event.x, event.y)) {
+                if (event.button === Qt.RightButton)
+                    Notifications.dismissCurrent();
+                else if (!Notifications.invokeDefault())
+                    Notifications.dismissToast();
+                return;
+            }
             var tray = bar.trayAt(event.x, event.y);
             if (tray >= 0) {
                 bar.activateTray(tray, event.button);
+                return;
+            }
+            // The paging marks and the dismiss mark sit over the list, so
+            // they are asked about before the row underneath them.
+            var scrollMark = bar.settingsScrollAt(event.x, event.y);
+            if (scrollMark >= 0) {
+                settingsIsland.scrollBy(scrollMark === 0 ? -1 : 1);
+                return;
+            }
+            var closeMark = bar.settingsCloseAt(event.x, event.y);
+            if (closeMark >= 0) {
+                settingsIsland.dismissRow(closeMark);
+                return;
+            }
+            // Rows in the settings panel take both buttons: one acts, the
+            // other forgets what it is looking at.
+            var settingRow = bar.settingsRowAt(event.x, event.y);
+            if (settingRow >= 0) {
+                settingsIsland.activateRow(settingRow,
+                                           event.button === Qt.RightButton);
                 return;
             }
             if (event.button !== Qt.LeftButton)
@@ -713,6 +1060,16 @@ Item {
             var control = bar.clockControlAt(event.x, event.y);
             if (control >= 0) {
                 clockIsland.control(control);
+                return;
+            }
+            var tab = bar.settingsTabAt(event.x, event.y);
+            if (tab >= 0) {
+                settingsIsland.page = tab;
+                return;
+            }
+            var setting = bar.settingsControlAt(event.x, event.y);
+            if (setting >= 0) {
+                settingsIsland.activate(setting);
                 return;
             }
             var column = bar.columnAt(event.x, event.y);
@@ -729,7 +1086,8 @@ Item {
         id: closeTimer
         // The launcher is the one state where the pointer is not the input, so
         // a bump of the mouse should not take a half-typed query with it.
-        interval: bar.launcherOpen ? Theme.launcherGraceMs : Theme.closeGraceMs
+        interval: bar.launcherOpen || bar.wantsKeyboard
+            ? Theme.launcherGraceMs : Theme.closeGraceMs
         onTriggered: bar.mode = 0
     }
 
@@ -767,6 +1125,20 @@ Item {
                 width: bar.clockW
                 height: bar.clockH
                 radius: bar.clockR
+            },
+            LiquidShape {
+                x: bar.settingsX
+                y: bar.settingsY
+                width: bar.settingsW
+                height: bar.settingsH
+                radius: bar.settingsR
+            },
+            LiquidShape {
+                x: bar.toastX
+                y: bar.toastY
+                width: bar.toastW
+                height: bar.toastH
+                radius: bar.toastR
             }
         ]
     }
@@ -990,5 +1362,41 @@ Item {
         // screen costs nothing.
         day: minuteClock.date
         live: secondClock.date
+    }
+
+    SettingsIsland {
+        id: settingsIsland
+        x: bar.settingsX
+        y: bar.settingsY
+        width: bar.settingsW
+        height: bar.settingsH
+        visible: bar.settingsVisible
+
+        draw: bar.settingsDraw
+        paneDraw: bar.settingsPane
+        hoveredTab: hit.hoverTab
+        hoveredControl: hit.hoverSetting
+        hoveredRow: hit.hoverSettingRow
+        hoveredClose: hit.hoverSettingClose
+        hoveredScroll: hit.hoverSettingScroll
+        active: bar.settingsOpen
+
+        // Choosing a section redraws the pane and nothing else. No delay: the
+        // rule it hangs from is already there.
+        onPageChanged: bar.drawSettingsPane(0)
+    }
+
+    ToastIsland {
+        id: toastIsland
+        x: bar.toastX
+        y: bar.toastY
+        width: bar.toastW
+        height: bar.toastH
+        visible: bar.toastVisible
+
+        draw: bar.toastDraw
+        life: bar.toastLife
+        hovered: hit.hoverToast
+        notification: bar.toastItem
     }
 }
