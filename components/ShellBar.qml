@@ -35,7 +35,7 @@ Item {
     signal sectionRequested(int index)
 
     readonly property var sections: [
-        { icon: Qt.resolvedUrl("../assets/icons/terminal.svg"), label: "TERMINAL" },
+        { icon: Qt.resolvedUrl("../assets/icons/terminal.svg"), label: "LAUNCHER" },
         { icon: Qt.resolvedUrl("../assets/icons/clock.svg"), label: "CLOCK" },
         { icon: Qt.resolvedUrl("../assets/icons/setting.svg"), label: "SETTINGS" }
     ]
@@ -57,8 +57,16 @@ Item {
     property real peekDraw: 0
     property real menuDraw: 0
 
+    // Which section panel is showing under the menu. -1 is the dock, the state
+    // the menu always opens in: a panel takes the dock's place rather than
+    // joining it, so there is never more than one island in that socket.
+    property int section: -1
+    property real launcher: 0
+    property real launcherDraw: 0
+
     readonly property bool engaged: mode >= 1
     readonly property bool opened: mode >= 2
+    readonly property bool launcherOpen: section === 0
 
     // ----- hover ------------------------------------------------------------
 
@@ -138,6 +146,19 @@ Item {
             easing.type: Easing.BezierSpline
             easing.bezierCurve: Theme.dockCurve
         }
+        // Whichever island is in the socket is the one that has to leave, and
+        // only one of the two is ever non-zero, so both are simply sent home.
+        NumberAnimation {
+            target: bar; property: "launcher"; to: 0
+            duration: Theme.launcherRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.easeOut
+        }
+        NumberAnimation {
+            target: bar; property: "launcherDraw"; to: 0
+            duration: Theme.durLauncherUndraw
+            easing.type: Easing.Linear
+        }
         SequentialAnimation {
             PauseAnimation { duration: Theme.menuCloseStartMs }
             NumberAnimation {
@@ -172,7 +193,93 @@ Item {
             openSequence.restart(); menuDrawIn.restart();
         } else {
             openSequence.stop(); menuDrawIn.stop();
+            // Cancel any swap in flight and give the socket back to the dock,
+            // so the next opening starts from the state it always starts from.
+            // `closeSequence` empties the socket either way.
+            toLauncher.stop(); toDock.stop();
+            section = -1;
             closeSequence.restart(); menuDrawOut.restart();
+        }
+    }
+
+    // ----- swapping the lower island ----------------------------------------
+    //
+    // The same shape as the entrance, one socket lower: one curve, then the
+    // next, pulled together by `sectionSwapOverlapMs`. The outgoing island is
+    // absorbed into the menu and the incoming one is extruded out of the same
+    // edge, so the exchange reads as one drawer replacing another.
+
+    ParallelAnimation {
+        id: toLauncher
+        NumberAnimation {
+            target: bar; property: "dock"; to: 0
+            duration: Theme.dockRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+        SequentialAnimation {
+            PauseAnimation { duration: Theme.launcherStartMs }
+            ParallelAnimation {
+                NumberAnimation {
+                    target: bar; property: "launcher"; to: 1
+                    duration: Theme.launcherEmergeMs
+                    easing.type: Easing.BezierSpline
+                    easing.bezierCurve: Theme.easeOut
+                }
+                // The panel's contents start with the panel, as the dock's do.
+                NumberAnimation {
+                    target: bar; property: "launcherDraw"; to: 1
+                    duration: Theme.durLauncherDraw
+                    easing.type: Easing.Linear
+                }
+            }
+        }
+    }
+
+    ParallelAnimation {
+        id: toDock
+        NumberAnimation {
+            target: bar; property: "launcher"; to: 0
+            duration: Theme.launcherRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.easeOut
+        }
+        NumberAnimation {
+            target: bar; property: "launcherDraw"; to: 0
+            duration: Theme.durLauncherUndraw
+            easing.type: Easing.Linear
+        }
+        SequentialAnimation {
+            PauseAnimation { duration: Theme.dockReturnStartMs }
+            NumberAnimation {
+                target: bar; property: "dock"; to: 1
+                duration: Theme.dockEmergeMs
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Theme.dockCurve
+            }
+        }
+    }
+
+    // A tile either owns a panel here or is still only a signal to the shell.
+    function chooseSection(index) {
+        if (index !== 0) {
+            sectionRequested(index);
+            return;
+        }
+        setSection(section === 0 ? -1 : 0);
+    }
+
+    function setSection(next) {
+        if (section === next)
+            return;
+        toLauncher.stop(); toDock.stop();
+        hit.wheelCarry = 0;
+        section = next;
+        if (next === 0) {
+            launcherIsland.reset();
+            toLauncher.restart();
+        } else {
+            toDock.restart();
         }
     }
 
@@ -220,6 +327,36 @@ Item {
     readonly property real dockContentX: dockX + (dockW - Theme.dockWidth) / 2
     readonly property real dockContentY: dockY + (dockH - Theme.dockHeight) / 2
 
+    // ----- the launcher island ----------------------------------------------
+    //
+    // Born in the same place the dock is, out of the menu's lower edge, and on
+    // the same terms: overlapping the menu rather than touching it, so the
+    // smooth minimum has something to bridge and a neck actually forms.
+
+    readonly property real launcherW: Theme.launcherWidth * launcher
+    readonly property real launcherH: Theme.launcherHeight * launcher
+    readonly property real launcherR: Theme.cornerRadius(
+        Theme.launcherRadius, launcherW, launcherH)
+    readonly property real launcherX: blobX + (shapeW - launcherW) / 2
+    readonly property real launcherCenterY: Theme.mix(
+        blobY + shapeH - Theme.dockEmergeDepth,
+        blobY + shapeH + Theme.dockGap + Theme.launcherHeight / 2,
+        launcher)
+    readonly property real launcherY: launcherCenterY - launcherH / 2
+    readonly property bool launcherVisible: launcher > 0.001
+
+    readonly property real launcherContentX:
+        launcherX + (launcherW - Theme.launcherWidth) / 2
+    readonly property real launcherContentY:
+        launcherY + (launcherH - Theme.launcherHeight) / 2
+
+    // The lowest point anything currently reaches, which is what the pointer
+    // has to be able to travel over.
+    readonly property real lowerBottom: Math.max(
+        blobY + shapeH,
+        dockVisible ? dockY + dockH : 0,
+        launcherVisible ? launcherY + launcherH : 0)
+
     readonly property var trayItems: SystemTray.items.values
 
     // Set while a tray item's own menu is open, which also suspends the bar's
@@ -246,6 +383,8 @@ Item {
         menuDraw, Theme.drawFrame, Theme.columns.length - 1) > 0.5
     readonly property bool dockInteractive:
         Theme.phase(menuDraw, Theme.drawTrayIcons) > 0.5
+    readonly property bool launcherInteractive: launcherVisible
+        && Theme.launcherPhase(launcherDraw, Theme.drawLauncherRow, 0) > 0.5
 
     readonly property real clockCenterY: Theme.mix(
         Theme.mix(Theme.clockCenterCollapsed, Theme.clockCenterPeek, peek),
@@ -305,6 +444,36 @@ Item {
         return -1;
     }
 
+    // The clock is the bar's switch: the pill opens the menu and the headline
+    // it grows into closes it again. Everything else inside the silhouette is
+    // surface, not button, so a click that lands on it does nothing -- missing
+    // a tile by a few pixels used to dismiss the whole menu.
+    function onHandle(px, py) {
+        if (!opened)
+            return true;
+        return py <= Theme.axisY;
+    }
+
+    // Whether a point is over the launcher panel at all, rather than over one
+    // of its rows: the wheel belongs to the whole panel, the query row and the
+    // empty space below the last result included.
+    function overLauncher(px, py) {
+        if (!launcherVisible)
+            return false;
+        var lx = px - (launcherContentX - blobX);
+        var ly = py - (launcherContentY - blobY);
+        return lx >= 0 && lx <= Theme.launcherWidth
+            && ly >= 0 && ly <= Theme.launcherHeight;
+    }
+
+    // Result rows, hit-tested from the same MouseArea in the same coordinates.
+    function launcherRowAt(px, py) {
+        if (!launcherInteractive)
+            return -1;
+        return launcherIsland.rowAt(px - (launcherContentX - blobX),
+                                    py - (launcherContentY - blobY));
+    }
+
     function closeTrayMenu() {
         trayMenuItem = null;
     }
@@ -342,14 +511,18 @@ Item {
         x: bar.blobX
         y: bar.blobY
         width: bar.shapeW
-        height: bar.dockVisible
-            ? bar.dockY + bar.dockH - bar.blobY : bar.shapeH
+        height: bar.lowerBottom - bar.blobY
         hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
         acceptedButtons: Qt.LeftButton | Qt.RightButton
 
         readonly property int hoverColumn: containsMouse ? bar.columnAt(mouseX, mouseY) : -1
         readonly property int hoverTray: containsMouse ? bar.trayAt(mouseX, mouseY) : -1
+        readonly property int hoverRow: containsMouse ? bar.launcherRowAt(mouseX, mouseY) : -1
+
+        // The cursor says which parts of the silhouette are actually pressable,
+        // now that the rest of it swallows clicks.
+        cursorShape: hoverColumn >= 0 || hoverTray >= 0 || hoverRow >= 0
+            || bar.onHandle(mouseX, mouseY) ? Qt.PointingHandCursor : Qt.ArrowCursor
 
         onEntered: {
             closeTimer.stop();
@@ -365,6 +538,32 @@ Item {
                 closeTimer.restart();
         }
 
+        // Scrolling is owned here for the same reason hover is: one handler
+        // for every pointer event the bar receives. A WheelHandler inside the
+        // panel was never reached.
+        //
+        // Deltas are normalized to rows before anything moves, so a touchpad's
+        // stream of small pixel deltas and a mouse's 15-degree notches scroll
+        // the same list at the same rate, and the remainder is carried rather
+        // than rounded away -- otherwise a slow touchpad scroll moves nothing
+        // at all, every event rounding to zero on its own.
+        property real wheelCarry: 0
+
+        onWheel: (event) => {
+            if (!bar.overLauncher(event.x, event.y)) {
+                event.accepted = false;
+                return;
+            }
+            wheelCarry += event.pixelDelta.y !== 0
+                ? event.pixelDelta.y / Theme.launcherRowHeight
+                : event.angleDelta.y / Theme.wheelNotch;
+            var steps = Math.trunc(wheelCarry);
+            if (steps === 0)
+                return;
+            wheelCarry -= steps;
+            launcherIsland.scrollBy(-steps);
+        }
+
         onClicked: (event) => {
             var tray = bar.trayAt(event.x, event.y);
             if (tray >= 0) {
@@ -374,18 +573,26 @@ Item {
             if (event.button !== Qt.LeftButton)
                 return;
             bar.closeTrayMenu();
-            var column = bar.columnAt(event.x, event.y);
-            if (column >= 0) {
-                bar.sectionRequested(column);
+            var row = bar.launcherRowAt(event.x, event.y);
+            if (row >= 0) {
+                launcherIsland.activate(row);
                 return;
             }
-            bar.mode = bar.mode >= 2 ? 1 : 2;
+            var column = bar.columnAt(event.x, event.y);
+            if (column >= 0) {
+                bar.chooseSection(column);
+                return;
+            }
+            if (bar.onHandle(event.x, event.y))
+                bar.mode = bar.mode >= 2 ? 1 : 2;
         }
     }
 
     Timer {
         id: closeTimer
-        interval: Theme.closeGraceMs
+        // The launcher is the one state where the pointer is not the input, so
+        // a bump of the mouse should not take a half-typed query with it.
+        interval: bar.launcherOpen ? Theme.launcherGraceMs : Theme.closeGraceMs
         onTriggered: bar.mode = 0
     }
 
@@ -409,6 +616,13 @@ Item {
                 width: bar.dockW
                 height: bar.dockH
                 radius: bar.dockR
+            },
+            LiquidShape {
+                x: bar.launcherX
+                y: bar.launcherY
+                width: bar.launcherW
+                height: bar.launcherH
+                radius: bar.launcherR
             }
         ]
     }
@@ -588,5 +802,23 @@ Item {
         batteryGaugeDraw: Theme.pen(Theme.phase(bar.menuDraw, Theme.drawBatteryGauge))
         trayFrameDraw: Theme.pen(Theme.phase(bar.menuDraw, Theme.drawTrayFrame))
         trayIconsReveal: Theme.pen(Theme.phase(bar.menuDraw, Theme.drawTrayIcons))
+    }
+
+    LauncherIsland {
+        id: launcherIsland
+        x: bar.launcherX
+        y: bar.launcherY
+        width: bar.launcherW
+        height: bar.launcherH
+        visible: bar.launcherVisible
+
+        draw: bar.launcherDraw
+        hovered: hit.hoverRow
+        // Holding the keyboard is a state of the panel, not of the window: the
+        // layer asks for on-demand focus from the same flag.
+        active: bar.launcherOpen
+
+        onLaunched: bar.mode = 0
+        onDismissed: bar.setSection(-1)
     }
 }

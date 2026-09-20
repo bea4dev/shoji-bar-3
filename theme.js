@@ -97,6 +97,60 @@ var trayIconGap = 16;
 // line work like everything else, at the cost of telling them apart.
 var trayDesaturate = 0.0;
 
+// ---------------------------------------------------------------------------
+// Launcher island: the first section panel, shown in the dock's place
+// ---------------------------------------------------------------------------
+//
+// Same width and corner as the dock island, because the two trade places in
+// the same socket under the menu: a change of outline there would read as the
+// bar rebuilding itself rather than as one drawer replacing another. Only the
+// height differs, and the surface is sized for whichever island is taller.
+var launcherWidth = dockWidth;
+var launcherRadius = dockRadius;
+
+// The panel's margins. Everything inside is placed off these rather than
+// written down independently, so widening the margin moves the contents with
+// it instead of merely clipping them closer to the edge.
+var launcherPadX = 24;
+var launcherPadTop = 22;
+var launcherPadBottom = 22;
+
+// Query row, in launcher-local coordinates.
+var launcherPromptX = launcherPadX + 2;
+var launcherQueryX = launcherPadX + 24;
+var launcherQueryY = launcherPadTop + 8;
+var launcherQuerySize = 13;
+var launcherAxisY = launcherQueryY + 22;
+
+// Results hang off a vertical rail the way samples hang off an axis: the rail
+// is drawn once, and each row is a tick branching out of it.
+var launcherRowsY = launcherAxisY + 22;
+var launcherRowHeight = 36;
+var launcherRows = 7;
+var launcherRailX = launcherPadX + 18;
+var launcherBranch = 10;
+var launcherIconX = launcherPadX + 36;
+var launcherIconSize = 20;
+var launcherNameX = launcherPadX + 66;
+// Width reserved at the right for the row's annotation, measured from the
+// island's inner edge.
+var launcherNoteWidth = 92;
+
+// Characters each text stage is sized for. A shorter string is written at the
+// same rate and then waits, rather than being stretched to fill its window.
+var launcherIndexChars = 2;
+var launcherCountChars = 11;
+var launcherNameChars = 16;
+
+// As with the tray, third-party icons are the one thing here not drawn in our
+// own ink. 0 leaves them as their applications authored them; 1 renders them
+// as line work, at the cost of telling them apart.
+var launcherDesaturate = 0.0;
+
+// Derived: the rows block, and the island that has to hold it.
+var launcherRowsHeight = launcherRows * launcherRowHeight;
+var launcherHeight = launcherRowsY + launcherRowsHeight + launcherPadBottom;
+
 // Context menu, drawn in the same vocabulary as the bar. It is a popup, not
 // part of the layer, so the compositor's island glass does not reach it and it
 // has to carry its own ground. Its alpha must also clear ShojiWM's popup-blur
@@ -128,7 +182,10 @@ var menuRadiusPopup = 14;
 // layer rect, so a section panel should extend the height no further than the
 // panel actually needs.
 var surfaceWidth = menuWidth + surfacePad * 2;
-var surfaceHeight = screenPad + menuHeight + dockGap + dockHeight + surfacePad;
+// Sized for the taller of the two lower islands, since they share the socket
+// and the surface itself is never resized.
+var lowerIslandHeight = Math.max(dockHeight, launcherHeight);
+var surfaceHeight = screenPad + menuHeight + dockGap + lowerIslandHeight + surfacePad;
 
 // ---------------------------------------------------------------------------
 // Material
@@ -243,6 +300,10 @@ var dockEmergeDepth = 16;
 
 // Delay before an unhovered menu collapses, so crossing a gap does not close it.
 var closeGraceMs = 260;
+// The launcher is the one state where the pointer is not the input, so the
+// grace is longer there: a bump of the mouse should not take a half-typed
+// query with it.
+var launcherGraceMs = 1400;
 
 // ---------------------------------------------------------------------------
 // Motion: the pen
@@ -412,6 +473,89 @@ var durMenuDraw = Math.round(drawScheduleMs * drawTempo);
 var durMenuUndraw = Math.round(durMenuDraw * drawUndrawRatio);
 var durPeekDraw = Math.round(peekScheduleMs * drawTempo);
 var durPeekUndraw = Math.round(durPeekDraw * drawUndrawRatio);
+
+// ---------------------------------------------------------------------------
+// Motion: the launcher island
+// ---------------------------------------------------------------------------
+//
+// A section panel does not open next to the dock, it takes its place: the dock
+// is absorbed back into the menu and the panel is extruded out of the same
+// edge. Two shapes crossing in one socket, so the swap is treated like the
+// entrance was — one curve after another, with an overlap knob rather than a
+// single curve stretched over both.
+
+var launcherEmergeMs = shapeMs(520);
+var launcherRetractMs = shapeMs(300);
+
+// How much of the outgoing island's retraction the incoming island's emergence
+// is allowed to run under. Zero is strictly serial: the socket is empty for an
+// instant between the two. Raising it past the retraction starts them together.
+var sectionSwapOverlapMs = shapeMs(140);
+
+var launcherStartMs = Math.max(0, dockRetractMs - sectionSwapOverlapMs);
+var dockReturnStartMs = Math.max(0, launcherRetractMs - sectionSwapOverlapMs);
+
+// The panel's own pen schedule, on its own driver. The menu's schedule cannot
+// carry it: that one is measured from the click, and the panel is drawn on a
+// gesture that happens some unknown time later.
+//
+//   launcherLeadInMs   dead time after the panel starts moving
+//   launcherRowStepMs  how far each row trails the one above it
+//   <stage>.stagger    whether the stage repeats per row
+
+var launcherLeadInMs = 100;
+var launcherRowStepMs = 60;
+
+// One notch of a mouse wheel, in the eighths of a degree Qt reports. A
+// touchpad sends pixels instead and is measured against the row height, so the
+// two devices move the same list at the same rate.
+var wheelNotch = 120;
+
+var drawLauncherPrompt = { at: 0, ms: 220 };
+var drawLauncherQuery = { at: 100, ms: 200 };
+var drawLauncherAxis = { at: 160, ms: 520 };
+var drawLauncherRail = { at: 340, ms: 480 };
+var drawLauncherCount = { at: 420, ms: typeMs(launcherCountChars) };
+var drawLauncherRow = { at: 520, ms: 300, stagger: true };
+
+// The icon only fades, and lands as its own row's branch finishes, the way the
+// menu's glyphs land with their frames.
+var drawLauncherIconMs = 220;
+var drawLauncherIcon = {
+    at: drawLauncherRow.at + drawLauncherRow.ms - drawLauncherIconMs,
+    ms: drawLauncherIconMs,
+    stagger: true
+};
+var drawLauncherName = {
+    at: drawLauncherRow.at + 120,
+    ms: typeMs(launcherNameChars),
+    stagger: true
+};
+
+// When a launcher stage starts, after the panel's lead-in and its row's trail.
+function launcherStageStart(stage, index) {
+    return launcherLeadInMs + stage.at
+        + (stage.stagger ? (index || 0) * launcherRowStepMs : 0);
+}
+
+function launcherStageEnd(stage) {
+    return launcherStageStart(stage, launcherRows - 1) + stage.ms;
+}
+
+var launcherScheduleMs = Math.max(
+    launcherStageEnd(drawLauncherPrompt), launcherStageEnd(drawLauncherQuery),
+    launcherStageEnd(drawLauncherAxis), launcherStageEnd(drawLauncherRail),
+    launcherStageEnd(drawLauncherCount), launcherStageEnd(drawLauncherRow),
+    launcherStageEnd(drawLauncherIcon), launcherStageEnd(drawLauncherName));
+
+var durLauncherDraw = Math.round(launcherScheduleMs * drawTempo);
+var durLauncherUndraw = Math.round(durLauncherDraw * drawUndrawRatio);
+
+// Progress of one launcher stage, given that panel's 0..1 driver.
+function launcherPhase(t, stage, index) {
+    var at = launcherStageStart(stage, index);
+    return remap(t * launcherScheduleMs, at, at + stage.ms);
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -602,7 +746,21 @@ function roundedRectPath(w, h, r, progress) {
         menuTint: menuTint,
         easeOut: easeOut,
         easeSustained: easeSustained,
-        dockCurve: dockCurve
+        dockCurve: dockCurve,
+
+        launcherHeight: launcherHeight,
+        lowerIslandHeight: lowerIslandHeight,
+        launcherEmergeMs: launcherEmergeMs,
+        launcherRetractMs: launcherRetractMs,
+        launcherStartMs: launcherStartMs,
+        dockReturnStartMs: dockReturnStartMs,
+        launcherScheduleMs: launcherScheduleMs,
+        durLauncherDraw: durLauncherDraw,
+        durLauncherUndraw: durLauncherUndraw,
+        launcherGraceMs: launcherGraceMs,
+        launcherPadX: launcherPadX,
+        launcherRowsY: launcherRowsY,
+        wheelNotch: wheelNotch
     };
 
     var stages = {
@@ -611,7 +769,15 @@ function roundedRectPath(w, h, r, progress) {
         drawLabel: drawLabel, drawBatteryIcon: drawBatteryIcon,
         drawBatteryValue: drawBatteryValue, drawBatteryStatus: drawBatteryStatus,
         drawBatteryGauge: drawBatteryGauge, drawTrayFrame: drawTrayFrame,
-        drawTrayIcons: drawTrayIcons
+        drawTrayIcons: drawTrayIcons,
+        drawLauncherPrompt: drawLauncherPrompt,
+        drawLauncherQuery: drawLauncherQuery,
+        drawLauncherAxis: drawLauncherAxis,
+        drawLauncherRail: drawLauncherRail,
+        drawLauncherCount: drawLauncherCount,
+        drawLauncherRow: drawLauncherRow,
+        drawLauncherIcon: drawLauncherIcon,
+        drawLauncherName: drawLauncherName
     };
 
     function broken(value) {
