@@ -151,6 +151,67 @@ var launcherDesaturate = 0.0;
 var launcherRowsHeight = launcherRows * launcherRowHeight;
 var launcherHeight = launcherRowsY + launcherRowsHeight + launcherPadBottom;
 
+// ---------------------------------------------------------------------------
+// Clock island: the second section panel, in the same socket
+// ---------------------------------------------------------------------------
+//
+// The menu's headline already says what time it is. This panel says where that
+// time sits: the day plotted as an axis with a marker on it, and the month
+// plotted as a grid with today bracketed. Same width and corner as the others,
+// because every island in the socket is the same drawer.
+var clockWidth = dockWidth;
+var clockRadius = dockRadius;
+
+var clockPadX = 24;
+var clockPadTop = 22;
+var clockPadBottom = 22;
+
+// Live readout and its annotations, in clock-local coordinates.
+var clockNowY = clockPadTop + 8;
+var clockNowSize = 15;
+
+// The day, 0..24, on the same rule the menu uses for seconds.
+var clockDayAxisY = clockNowY + 26;
+var clockHourLabelY = clockDayAxisY + 10;
+var clockAxisDivisions = 12;
+
+// The month, as a grid. Six week rows is the most any month needs once the
+// weeks start on Monday, and a fixed count keeps the island from resizing
+// between months.
+var clockMonthY = clockHourLabelY + 34;
+var clockWeekdayY = clockMonthY + 22;
+var clockGridY = clockWeekdayY + 12;
+var clockRowHeight = 26;
+var clockWeeks = 6;
+var clockColumns = 7;
+// Today is bracketed, not filled -- the same answer the launcher's rail gives.
+var clockCellRadius = 8;
+var clockCellWidth = 30;
+var clockCellHeight = 22;
+
+var clockNowChars = 12;
+var clockStampChars = 10;
+var clockMonthChars = 14;
+
+// Month controls: previous, today, next, in a row at the right of the month
+// line. Their hit boxes are square and centred on each mark, and the marks are
+// spaced far enough apart that the boxes do not touch.
+var clockControls = 3;
+var clockControlSize = 22;
+var clockControlStep = 26;
+// Centre of the last mark, measured in from the island's right edge.
+var clockControlInset = clockPadX + 7;
+var clockControlY = clockMonthY;
+
+// Centre of one control, from the island's left edge.
+function clockControlX(index) {
+    return clockWidth - clockControlInset
+        - (clockControls - 1 - index) * clockControlStep;
+}
+
+var clockGridHeight = clockWeeks * clockRowHeight;
+var clockHeight = clockGridY + clockGridHeight + clockPadBottom;
+
 // Context menu, drawn in the same vocabulary as the bar. It is a popup, not
 // part of the layer, so the compositor's island glass does not reach it and it
 // has to carry its own ground. Its alpha must also clear ShojiWM's popup-blur
@@ -184,7 +245,7 @@ var menuRadiusPopup = 14;
 var surfaceWidth = menuWidth + surfacePad * 2;
 // Sized for the taller of the two lower islands, since they share the socket
 // and the surface itself is never resized.
-var lowerIslandHeight = Math.max(dockHeight, launcherHeight);
+var lowerIslandHeight = Math.max(dockHeight, launcherHeight, clockHeight);
 var surfaceHeight = screenPad + menuHeight + dockGap + lowerIslandHeight + surfacePad;
 
 // ---------------------------------------------------------------------------
@@ -260,7 +321,7 @@ var dockCurve = easeOut;
 // for the pen. 1.0 is the durations as written below; 0.5 halves all of them.
 // Everything derived from them follows, including the point at which the pen's
 // schedule believes the lower island starts moving.
-var shapeTempo = 1.25;
+var shapeTempo = 1.0;
 
 function shapeMs(ms) {
     return Math.round(ms * shapeTempo);
@@ -328,7 +389,7 @@ var launcherGraceMs = 1400;
 
 // One number to make the whole thing faster or slower. 1.0 is the schedule as
 // written below; 0.5 halves every delay and duration in it.
-var drawTempo = 0.6;
+var drawTempo = 0.4;
 
 // Dead time before the first stroke, so the silhouette lands before anything
 // starts being drawn into it. Every stage's `at` is measured after this, and it
@@ -484,19 +545,24 @@ var durPeekUndraw = Math.round(durPeekDraw * drawUndrawRatio);
 // entrance was — one curve after another, with an overlap knob rather than a
 // single curve stretched over both.
 
-var launcherEmergeMs = shapeMs(520);
-var launcherRetractMs = shapeMs(300);
+// Every island in the socket moves on the same clock. They differ in what they
+// hold and how tall they are, not in how fast they arrive -- a panel that
+// entered faster than the dock would read as a different mechanism rather than
+// as the same drawer with something else in it. The dock's tuned numbers are
+// the socket's.
+var socketEmergeMs = dockEmergeMs;
+var socketRetractMs = dockRetractMs;
 
 // How much of the outgoing island's retraction the incoming island's emergence
 // is allowed to run under. Zero is strictly serial: the socket is empty for an
 // instant between the two. Raising it past the retraction starts them together.
 var sectionSwapOverlapMs = shapeMs(140);
 
-var launcherStartMs = Math.max(0, dockRetractMs - sectionSwapOverlapMs);
-var dockReturnStartMs = Math.max(0, launcherRetractMs - sectionSwapOverlapMs);
+// When the incoming island starts, measured from the beginning of a swap.
+var socketAdmitMs = Math.max(0, socketRetractMs - sectionSwapOverlapMs);
 
-// The panel's own pen schedule, on its own driver. The menu's schedule cannot
-// carry it: that one is measured from the click, and the panel is drawn on a
+// Each panel's own pen schedule, on its own driver. The menu's schedule cannot
+// carry them: that one is measured from the click, and a panel is drawn on a
 // gesture that happens some unknown time later.
 //
 //   launcherLeadInMs   dead time after the panel starts moving
@@ -555,6 +621,53 @@ var durLauncherUndraw = Math.round(durLauncherDraw * drawUndrawRatio);
 function launcherPhase(t, stage, index) {
     var at = launcherStageStart(stage, index);
     return remap(t * launcherScheduleMs, at, at + stage.ms);
+}
+
+// ----- the clock panel's pen schedule ---------------------------------------
+//
+// Top to bottom, which is also the order the panel is read in: the readout,
+// the day it sits in, then the month that day sits in. The bracket around
+// today is drawn last, as the answer to the grid rather than part of it.
+
+var clockLeadInMs = 100;
+var clockRowStepMs = 55;
+
+var drawClockNow = { at: 0, ms: typeMs(clockNowChars) };
+var drawClockStamp = { at: 140, ms: typeMs(clockStampChars) };
+var drawClockAxis = { at: 200, ms: 560 };
+var drawClockHours = { at: 560, ms: 280 };
+var drawClockMonth = { at: 480, ms: typeMs(clockMonthChars) };
+var drawClockWeekdays = { at: 640, ms: 300 };
+var drawClockRow = { at: 780, ms: 320, stagger: true };
+
+var drawClockTodayMs = 300;
+var drawClockToday = {
+    at: drawClockRow.at + (clockWeeks - 1) * clockRowStepMs + drawClockRow.ms + 40,
+    ms: drawClockTodayMs
+};
+
+function clockStageStart(stage, index) {
+    return clockLeadInMs + stage.at
+        + (stage.stagger ? (index || 0) * clockRowStepMs : 0);
+}
+
+function clockStageEnd(stage) {
+    return clockStageStart(stage, clockWeeks - 1) + stage.ms;
+}
+
+var clockScheduleMs = Math.max(
+    clockStageEnd(drawClockNow), clockStageEnd(drawClockStamp),
+    clockStageEnd(drawClockAxis), clockStageEnd(drawClockHours),
+    clockStageEnd(drawClockMonth), clockStageEnd(drawClockWeekdays),
+    clockStageEnd(drawClockRow), clockStageEnd(drawClockToday));
+
+var durClockDraw = Math.round(clockScheduleMs * drawTempo);
+var durClockUndraw = Math.round(durClockDraw * drawUndrawRatio);
+
+// Progress of one clock stage, given that panel's 0..1 driver.
+function clockPhase(t, stage, index) {
+    var at = clockStageStart(stage, index);
+    return remap(t * clockScheduleMs, at, at + stage.ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -750,17 +863,20 @@ function roundedRectPath(w, h, r, progress) {
 
         launcherHeight: launcherHeight,
         lowerIslandHeight: lowerIslandHeight,
-        launcherEmergeMs: launcherEmergeMs,
-        launcherRetractMs: launcherRetractMs,
-        launcherStartMs: launcherStartMs,
-        dockReturnStartMs: dockReturnStartMs,
+        clockHeight: clockHeight,
+        socketEmergeMs: socketEmergeMs,
+        socketRetractMs: socketRetractMs,
+        socketAdmitMs: socketAdmitMs,
         launcherScheduleMs: launcherScheduleMs,
         durLauncherDraw: durLauncherDraw,
         durLauncherUndraw: durLauncherUndraw,
         launcherGraceMs: launcherGraceMs,
         launcherPadX: launcherPadX,
         launcherRowsY: launcherRowsY,
-        wheelNotch: wheelNotch
+        wheelNotch: wheelNotch,
+        clockScheduleMs: clockScheduleMs,
+        durClockDraw: durClockDraw,
+        durClockUndraw: durClockUndraw
     };
 
     var stages = {
@@ -777,7 +893,15 @@ function roundedRectPath(w, h, r, progress) {
         drawLauncherCount: drawLauncherCount,
         drawLauncherRow: drawLauncherRow,
         drawLauncherIcon: drawLauncherIcon,
-        drawLauncherName: drawLauncherName
+        drawLauncherName: drawLauncherName,
+        drawClockNow: drawClockNow,
+        drawClockStamp: drawClockStamp,
+        drawClockAxis: drawClockAxis,
+        drawClockHours: drawClockHours,
+        drawClockMonth: drawClockMonth,
+        drawClockWeekdays: drawClockWeekdays,
+        drawClockRow: drawClockRow,
+        drawClockToday: drawClockToday
     };
 
     function broken(value) {

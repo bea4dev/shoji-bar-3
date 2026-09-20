@@ -63,10 +63,13 @@ Item {
     property int section: -1
     property real launcher: 0
     property real launcherDraw: 0
+    property real clock: 0
+    property real clockDraw: 0
 
     readonly property bool engaged: mode >= 1
     readonly property bool opened: mode >= 2
     readonly property bool launcherOpen: section === 0
+    readonly property bool clockOpen: section === 1
 
     // ----- hover ------------------------------------------------------------
 
@@ -114,60 +117,170 @@ Item {
     // island is absorbed before the menu collapses. The pen runs alongside,
     // because the linework belongs to both islands at once.
 
-    // Parallel with a delayed branch rather than two phases in a row, so the
-    // second animation can be pulled back into the first by `dockOverlapMs`.
-    // The delay is a plain constant from theme.js, not `mode >= n ? a : b`:
+    // The menu and the socket beneath it are animated separately, not as one
+    // sequence per direction. They have to be startable and stoppable on their
+    // own: swapping panels while the menu is still expanding must replace what
+    // is in the socket without freezing the menu halfway. The timings are
+    // unchanged by the split -- each socket animation still carries the delay
+    // that makes it serial with the menu.
+    //
+    // Every delay is a plain constant from theme.js, never `mode >= n ? a : b`:
     // a Behavior would read such a binding one transition late, and that is
-    // what made the island leave with the menu when opening from hover.
-    ParallelAnimation {
-        id: openSequence
+    // what once made the island leave with the menu when opening from hover.
+
+    NumberAnimation {
+        id: menuIn
+        target: bar; property: "open"; to: 1
+        duration: Theme.durMenu
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.easeOut
+    }
+
+    SequentialAnimation {
+        id: menuOut
+        // The socket empties first; the menu only starts to collapse once the
+        // island is most of the way home.
+        PauseAnimation { duration: Theme.menuCloseStartMs }
         NumberAnimation {
-            target: bar; property: "open"; to: 1
+            target: bar; property: "open"; to: 0
             duration: Theme.durMenu
             easing.type: Easing.BezierSpline
             easing.bezierCurve: Theme.easeOut
         }
-        SequentialAnimation {
-            PauseAnimation { duration: Theme.dockStartMs }
+    }
+
+    // ----- the socket -------------------------------------------------------
+    //
+    // One pair of animations per island that can occupy the socket, and no
+    // animation that knows about more than one of them. A swap is then just
+    // "the one leaving runs its Out, the one arriving runs its In", which is
+    // the same code whichever two islands are involved and stays the same code
+    // when a third is added.
+    //
+    // Each In carries its own pause, whose duration is WRITTEN rather than
+    // bound: `dockStartMs` when the menu is opening, `socketAdmitMs` when one
+    // island is replacing another. A binding here would be read one transition
+    // late -- the same trap that once made the island leave with the menu.
+
+    SequentialAnimation {
+        id: dockIn
+        PauseAnimation { id: dockInDelay }
+        NumberAnimation {
+            target: bar; property: "dock"; to: 1
+            duration: Theme.socketEmergeMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+    }
+
+    NumberAnimation {
+        id: dockOut
+        target: bar; property: "dock"; to: 0
+        duration: Theme.socketRetractMs
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.dockCurve
+    }
+
+    // A panel's contents start with the panel, as the dock's do.
+    SequentialAnimation {
+        id: launcherIn
+        PauseAnimation { id: launcherInDelay }
+        ParallelAnimation {
             NumberAnimation {
-                target: bar; property: "dock"; to: 1
-                duration: Theme.dockEmergeMs
+                target: bar; property: "launcher"; to: 1
+                duration: Theme.socketEmergeMs
                 easing.type: Easing.BezierSpline
                 easing.bezierCurve: Theme.dockCurve
+            }
+            NumberAnimation {
+                target: bar; property: "launcherDraw"; to: 1
+                duration: Theme.durLauncherDraw
+                easing.type: Easing.Linear
             }
         }
     }
 
     ParallelAnimation {
-        id: closeSequence
-        NumberAnimation {
-            target: bar; property: "dock"; to: 0
-            duration: Theme.dockRetractMs
-            easing.type: Easing.BezierSpline
-            easing.bezierCurve: Theme.dockCurve
-        }
-        // Whichever island is in the socket is the one that has to leave, and
-        // only one of the two is ever non-zero, so both are simply sent home.
+        id: launcherOut
         NumberAnimation {
             target: bar; property: "launcher"; to: 0
-            duration: Theme.launcherRetractMs
+            duration: Theme.socketRetractMs
             easing.type: Easing.BezierSpline
-            easing.bezierCurve: Theme.easeOut
+            easing.bezierCurve: Theme.dockCurve
         }
         NumberAnimation {
             target: bar; property: "launcherDraw"; to: 0
             duration: Theme.durLauncherUndraw
             easing.type: Easing.Linear
         }
-        SequentialAnimation {
-            PauseAnimation { duration: Theme.menuCloseStartMs }
+    }
+
+    SequentialAnimation {
+        id: clockIn
+        PauseAnimation { id: clockInDelay }
+        ParallelAnimation {
             NumberAnimation {
-                target: bar; property: "open"; to: 0
-                duration: Theme.durMenu
+                target: bar; property: "clock"; to: 1
+                duration: Theme.socketEmergeMs
                 easing.type: Easing.BezierSpline
-                easing.bezierCurve: Theme.easeOut
+                easing.bezierCurve: Theme.dockCurve
+            }
+            NumberAnimation {
+                target: bar; property: "clockDraw"; to: 1
+                duration: Theme.durClockDraw
+                easing.type: Easing.Linear
             }
         }
+    }
+
+    ParallelAnimation {
+        id: clockOut
+        NumberAnimation {
+            target: bar; property: "clock"; to: 0
+            duration: Theme.socketRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+        NumberAnimation {
+            target: bar; property: "clockDraw"; to: 0
+            duration: Theme.durClockUndraw
+            easing.type: Easing.Linear
+        }
+    }
+
+    // The socket, addressed by section index: -1 is the dock, 0 and up are the
+    // menu's tiles in order.
+    function islandIn(which) {
+        return which === 0 ? launcherIn : which === 1 ? clockIn : dockIn;
+    }
+
+    function islandInDelay(which) {
+        return which === 0 ? launcherInDelay
+            : which === 1 ? clockInDelay : dockInDelay;
+    }
+
+    function islandOut(which) {
+        return which === 0 ? launcherOut : which === 1 ? clockOut : dockOut;
+    }
+
+    function stopSocket() {
+        dockIn.stop(); dockOut.stop();
+        launcherIn.stop(); launcherOut.stop();
+        clockIn.stop(); clockOut.stop();
+    }
+
+    // Written, not bound, and written before the animation is started.
+    function fillSocket(which, delayMs) {
+        islandInDelay(which).duration = delayMs;
+        islandIn(which).restart();
+    }
+
+    // Only one island is ever non-zero, so all of them are simply sent home
+    // and whichever was showing is the one that reads as leaving.
+    function emptySocket() {
+        dockOut.restart();
+        launcherOut.restart();
+        clockOut.restart();
     }
 
     NumberAnimation {
@@ -189,98 +302,68 @@ Item {
             closeTrayMenu();
 
         if (opened) {
-            closeSequence.stop(); menuDrawOut.stop();
-            openSequence.restart(); menuDrawIn.restart();
+            menuOut.stop(); menuDrawOut.stop(); stopSocket();
+            menuIn.restart(); menuDrawIn.restart();
+            // Which island the menu opens with. Everything but a keybinding
+            // opens with the dock, because closing always resets the section.
+            fillSocket(section, Theme.dockStartMs);
         } else {
-            openSequence.stop(); menuDrawIn.stop();
-            // Cancel any swap in flight and give the socket back to the dock,
-            // so the next opening starts from the state it always starts from.
-            // `closeSequence` empties the socket either way.
-            toLauncher.stop(); toDock.stop();
+            menuIn.stop(); menuDrawIn.stop(); stopSocket();
+            // The next opening starts from the state it always starts from.
             section = -1;
-            closeSequence.restart(); menuDrawOut.restart();
-        }
-    }
-
-    // ----- swapping the lower island ----------------------------------------
-    //
-    // The same shape as the entrance, one socket lower: one curve, then the
-    // next, pulled together by `sectionSwapOverlapMs`. The outgoing island is
-    // absorbed into the menu and the incoming one is extruded out of the same
-    // edge, so the exchange reads as one drawer replacing another.
-
-    ParallelAnimation {
-        id: toLauncher
-        NumberAnimation {
-            target: bar; property: "dock"; to: 0
-            duration: Theme.dockRetractMs
-            easing.type: Easing.BezierSpline
-            easing.bezierCurve: Theme.dockCurve
-        }
-        SequentialAnimation {
-            PauseAnimation { duration: Theme.launcherStartMs }
-            ParallelAnimation {
-                NumberAnimation {
-                    target: bar; property: "launcher"; to: 1
-                    duration: Theme.launcherEmergeMs
-                    easing.type: Easing.BezierSpline
-                    easing.bezierCurve: Theme.easeOut
-                }
-                // The panel's contents start with the panel, as the dock's do.
-                NumberAnimation {
-                    target: bar; property: "launcherDraw"; to: 1
-                    duration: Theme.durLauncherDraw
-                    easing.type: Easing.Linear
-                }
-            }
-        }
-    }
-
-    ParallelAnimation {
-        id: toDock
-        NumberAnimation {
-            target: bar; property: "launcher"; to: 0
-            duration: Theme.launcherRetractMs
-            easing.type: Easing.BezierSpline
-            easing.bezierCurve: Theme.easeOut
-        }
-        NumberAnimation {
-            target: bar; property: "launcherDraw"; to: 0
-            duration: Theme.durLauncherUndraw
-            easing.type: Easing.Linear
-        }
-        SequentialAnimation {
-            PauseAnimation { duration: Theme.dockReturnStartMs }
-            NumberAnimation {
-                target: bar; property: "dock"; to: 1
-                duration: Theme.dockEmergeMs
-                easing.type: Easing.BezierSpline
-                easing.bezierCurve: Theme.dockCurve
-            }
+            menuOut.restart(); menuDrawOut.restart(); emptySocket();
         }
     }
 
     // A tile either owns a panel here or is still only a signal to the shell.
     function chooseSection(index) {
-        if (index !== 0) {
+        if (index > 1) {
             sectionRequested(index);
             return;
         }
-        setSection(section === 0 ? -1 : 0);
+        setSection(section === index ? -1 : index);
     }
 
     function setSection(next) {
         if (section === next)
             return;
-        toLauncher.stop(); toDock.stop();
+        stopSocket();
         hit.wheelCarry = 0;
+        islandOut(section).restart();
         section = next;
-        if (next === 0) {
+        if (next === 0)
             launcherIsland.reset();
-            toLauncher.restart();
-        } else {
-            toDock.restart();
+        else if (next === 1)
+            clockIsland.reset();
+        fillSocket(next, Theme.socketAdmitMs);
+    }
+
+    // ----- external control -------------------------------------------------
+    //
+    // The launcher is the one thing here a keybinding is expected to reach, so
+    // it has an entry point that does not go through the pointer. Opening from
+    // collapsed puts the panel in the socket *before* the menu commits, so the
+    // dock is never extruded only to be swallowed again a frame later.
+
+    function openLauncher() {
+        if (opened) {
+            setSection(0);
+            return;
         }
+        section = 0;
+        mode = 2;
+    }
+
+    function closeLauncher() {
+        if (launcherOpen)
+            mode = 0;
+    }
+
+    function toggleLauncher() {
+        if (launcherOpen)
+            mode = 0;
+        else
+            openLauncher();
     }
 
     // ----- derived silhouette ----------------------------------------------
@@ -350,12 +433,32 @@ Item {
     readonly property real launcherContentY:
         launcherY + (launcherH - Theme.launcherHeight) / 2
 
+    // ----- the clock island -------------------------------------------------
+    //
+    // Same socket, same terms. Only the height differs, and the surface was
+    // sized for the tallest of them.
+
+    readonly property real clockW: Theme.clockWidth * clock
+    readonly property real clockH: Theme.clockHeight * clock
+    readonly property real clockR: Theme.cornerRadius(Theme.clockRadius, clockW, clockH)
+    readonly property real clockX: blobX + (shapeW - clockW) / 2
+    readonly property real clockCenterY: Theme.mix(
+        blobY + shapeH - Theme.dockEmergeDepth,
+        blobY + shapeH + Theme.dockGap + Theme.clockHeight / 2,
+        clock)
+    readonly property real clockY: clockCenterY - clockH / 2
+    readonly property bool clockVisible: clock > 0.001
+
+    readonly property real clockContentX: clockX + (clockW - Theme.clockWidth) / 2
+    readonly property real clockContentY: clockY + (clockH - Theme.clockHeight) / 2
+
     // The lowest point anything currently reaches, which is what the pointer
     // has to be able to travel over.
     readonly property real lowerBottom: Math.max(
         blobY + shapeH,
         dockVisible ? dockY + dockH : 0,
-        launcherVisible ? launcherY + launcherH : 0)
+        launcherVisible ? launcherY + launcherH : 0,
+        clockVisible ? clockY + clockH : 0)
 
     readonly property var trayItems: SystemTray.items.values
 
@@ -385,8 +488,12 @@ Item {
         Theme.phase(menuDraw, Theme.drawTrayIcons) > 0.5
     readonly property bool launcherInteractive: launcherVisible
         && Theme.launcherPhase(launcherDraw, Theme.drawLauncherRow, 0) > 0.5
+    readonly property bool clockInteractive: clockVisible
+        && Theme.clockPhase(clockDraw, Theme.drawClockMonth) > 0.5
 
-    readonly property real clockCenterY: Theme.mix(
+    // The headline readout's centre line. Named for the element rather than for
+    // the clock, now that an island carries that name too.
+    readonly property real readoutCenterY: Theme.mix(
         Theme.mix(Theme.clockCenterCollapsed, Theme.clockCenterPeek, peek),
         Theme.clockCenterMenu, open)
 
@@ -466,6 +573,25 @@ Item {
             && ly >= 0 && ly <= Theme.launcherHeight;
     }
 
+    // The month controls, hit-tested in the same coordinates as everything
+    // else the bar owns.
+    function clockControlAt(px, py) {
+        if (!clockInteractive)
+            return -1;
+        return clockIsland.controlAt(px - (clockContentX - blobX),
+                                     py - (clockContentY - blobY));
+    }
+
+    // The clock panel takes the wheel too, to page the month.
+    function overClock(px, py) {
+        if (!clockVisible)
+            return false;
+        var lx = px - (clockContentX - blobX);
+        var ly = py - (clockContentY - blobY);
+        return lx >= 0 && lx <= Theme.clockWidth
+            && ly >= 0 && ly <= Theme.clockHeight;
+    }
+
     // Result rows, hit-tested from the same MouseArea in the same coordinates.
     function launcherRowAt(px, py) {
         if (!launcherInteractive)
@@ -518,11 +644,13 @@ Item {
         readonly property int hoverColumn: containsMouse ? bar.columnAt(mouseX, mouseY) : -1
         readonly property int hoverTray: containsMouse ? bar.trayAt(mouseX, mouseY) : -1
         readonly property int hoverRow: containsMouse ? bar.launcherRowAt(mouseX, mouseY) : -1
+        readonly property int hoverControl: containsMouse ? bar.clockControlAt(mouseX, mouseY) : -1
 
         // The cursor says which parts of the silhouette are actually pressable,
         // now that the rest of it swallows clicks.
         cursorShape: hoverColumn >= 0 || hoverTray >= 0 || hoverRow >= 0
-            || bar.onHandle(mouseX, mouseY) ? Qt.PointingHandCursor : Qt.ArrowCursor
+            || hoverControl >= 0 || bar.onHandle(mouseX, mouseY)
+            ? Qt.PointingHandCursor : Qt.ArrowCursor
 
         onEntered: {
             closeTimer.stop();
@@ -550,7 +678,8 @@ Item {
         property real wheelCarry: 0
 
         onWheel: (event) => {
-            if (!bar.overLauncher(event.x, event.y)) {
+            var overLauncher = bar.overLauncher(event.x, event.y);
+            if (!overLauncher && !bar.overClock(event.x, event.y)) {
                 event.accepted = false;
                 return;
             }
@@ -561,7 +690,10 @@ Item {
             if (steps === 0)
                 return;
             wheelCarry -= steps;
-            launcherIsland.scrollBy(-steps);
+            if (overLauncher)
+                launcherIsland.scrollBy(-steps);
+            else
+                clockIsland.page(-steps);
         }
 
         onClicked: (event) => {
@@ -576,6 +708,11 @@ Item {
             var row = bar.launcherRowAt(event.x, event.y);
             if (row >= 0) {
                 launcherIsland.activate(row);
+                return;
+            }
+            var control = bar.clockControlAt(event.x, event.y);
+            if (control >= 0) {
+                clockIsland.control(control);
                 return;
             }
             var column = bar.columnAt(event.x, event.y);
@@ -623,6 +760,13 @@ Item {
                 width: bar.launcherW
                 height: bar.launcherH
                 radius: bar.launcherR
+            },
+            LiquidShape {
+                x: bar.clockX
+                y: bar.clockY
+                width: bar.clockW
+                height: bar.clockH
+                radius: bar.clockR
             }
         ]
     }
@@ -656,7 +800,7 @@ Item {
             // Tracking adds a trailing gap after the last glyph, so the naive
             // centre is off by half of it.
             x: (content.width - width) / 2 + font.letterSpacing / 2
-            y: bar.clockCenterY - height / 2
+            y: bar.readoutCenterY - height / 2
         }
 
         // Resting indicator: minutes elapsed in the hour, plotted. Updates once
@@ -666,7 +810,7 @@ Item {
             readonly property real span: 56
             width: span
             x: (content.width - width) / 2
-            y: bar.clockCenterY + 11
+            y: bar.readoutCenterY + 11
             visible: bar.minuteDraw > 0.001
 
             Rectangle {
@@ -819,6 +963,32 @@ Item {
         active: bar.launcherOpen
 
         onLaunched: bar.mode = 0
-        onDismissed: bar.setSection(-1)
+        // Escape gives the socket back to the dock while the pointer is on the
+        // bar -- there is something to go back to. Opened from a keybinding the
+        // pointer is elsewhere, nothing would ever dismiss the menu, so Escape
+        // closes the bar outright.
+        onDismissed: {
+            if (hit.containsMouse)
+                bar.setSection(-1);
+            else
+                bar.mode = 0;
+        }
+    }
+
+    ClockIsland {
+        id: clockIsland
+        x: bar.clockX
+        y: bar.clockY
+        width: bar.clockW
+        height: bar.clockH
+        visible: bar.clockVisible
+
+        draw: bar.clockDraw
+        hoveredControl: hit.hoverControl
+        // Minutes drive the calendar, seconds drive the readout. The second
+        // clock only runs while the menu is open, so a panel that is not on
+        // screen costs nothing.
+        day: minuteClock.date
+        live: secondClock.date
     }
 }

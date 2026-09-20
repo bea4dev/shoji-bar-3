@@ -73,6 +73,14 @@ ShellRoot {
                     radius: Math.round(bar.launcherR)
                 }
 
+                Region {
+                    x: Math.round(bar.clockX)
+                    y: Math.round(bar.clockY)
+                    width: Math.round(bar.clockW)
+                    height: Math.round(bar.clockH)
+                    radius: Math.round(bar.clockR)
+                }
+
                 // The neck between the islands draws as glass but is not part
                 // of either rounded box, and a hole in the input region reads
                 // to the client as "the pointer left the bar": crossing the
@@ -94,6 +102,14 @@ ShellRoot {
                     width: Math.round(bar.launcherW)
                     height: Math.max(0, Math.round(bar.launcherY) - top + 1)
                 }
+
+                Region {
+                    readonly property int top: Math.round(bar.blobY + bar.shapeH) - 1
+                    x: Math.round(bar.clockX)
+                    y: top
+                    width: Math.round(bar.clockW)
+                    height: Math.max(0, Math.round(bar.clockY) - top + 1)
+                }
             }
 
             ShellBar {
@@ -106,6 +122,26 @@ ShellRoot {
                     // remaining two follow that shape: another island in the
                     // same socket, swapped for whichever one is showing.
                     console.log("shoji-bar-3: section", index, "requested");
+                }
+            }
+
+            // Requests from outside the bar: a compositor keybinding, a
+            // script. The request names a screen so a binding can send it to
+            // the monitor under the pointer -- ShojiWM's config already
+            // computes that for its other shell calls -- and an empty name
+            // addresses every screen.
+            Connections {
+                target: LauncherIpc
+
+                function onRequested(action: string, screenName: string): void {
+                    if (screenName !== "" && screenName !== panel.screen.name)
+                        return;
+                    if (action === "open")
+                        bar.openLauncher();
+                    else if (action === "close")
+                        bar.closeLauncher();
+                    else
+                        bar.toggleLauncher();
                 }
             }
 
