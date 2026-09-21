@@ -23,20 +23,28 @@ Item {
     property real glyphReveal: 1
     property real labelReveal: 1
 
+    // The menu's own measurements by default; a panel that wants the same
+    // tile at another size passes its own.
+    property real size: Theme.tileSize
+    property real radius: Theme.tileRadius
+    property real glyphSize: Theme.iconSize
+    property real labelOffset: Theme.labelY - Theme.tileY
+    property int labelCapacity: Theme.labelChars
+
     readonly property real weight: hovered ? Theme.strokeWeightHover : Theme.strokeWeight
     // Axis-aligned hairlines snap to whole device pixels; the frame's curves do
     // not, because the curve renderer resolves their coverage analytically.
     readonly property real hairline: Theme.hairline(Screen.devicePixelRatio)
 
-    implicitWidth: Theme.tileSize
-    implicitHeight: Theme.labelY - Theme.tileY + 12
+    implicitWidth: tile.size
+    implicitHeight: tile.labelOffset + 12
     width: implicitWidth
     height: implicitHeight
 
     Shape {
         id: frame
-        width: Theme.tileSize
-        height: Theme.tileSize
+        width: tile.size
+        height: tile.size
         // Per-pixel analytic coverage. The geometry renderer would be the only
         // one honouring a dash pattern, but it has no antialiasing at all, so
         // the outline is truncated geometrically instead and this renderer is
@@ -58,8 +66,8 @@ Item {
             joinStyle: ShapePath.RoundJoin
 
             PathSvg {
-                path: Theme.roundedRectPath(Theme.tileSize, Theme.tileSize,
-                                            Theme.tileRadius, tile.draw)
+                path: Theme.roundedRectPath(tile.size, tile.size,
+                                            tile.radius, tile.draw)
             }
 
             Behavior on strokeWidth {
@@ -107,12 +115,12 @@ Item {
     Image {
         id: glyph
         anchors.centerIn: frame
-        width: Theme.iconSize
-        height: Theme.iconSize
+        width: tile.glyphSize
+        height: tile.glyphSize
         source: tile.source
         // Rasterize the SVG well above its drawn size; these are 1.5px strokes.
-        sourceSize.width: Theme.iconSize * 4
-        sourceSize.height: Theme.iconSize * 4
+        sourceSize.width: tile.glyphSize * 4
+        sourceSize.height: tile.glyphSize * 4
         smooth: true
         visible: false
     }
@@ -137,9 +145,9 @@ Item {
 
     TypedText {
         anchors.horizontalCenter: frame.horizontalCenter
-        y: Theme.labelY - Theme.tileY
+        y: tile.labelOffset
         content: tile.label
-        capacity: Theme.labelChars
+        capacity: tile.labelCapacity
         reveal: tile.labelReveal
         ink: Theme.textMuted
         pixelSize: 9

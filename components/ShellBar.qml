@@ -38,7 +38,8 @@ Item {
     readonly property var sections: [
         { icon: Qt.resolvedUrl("../assets/icons/terminal.svg"), label: "LAUNCHER" },
         { icon: Qt.resolvedUrl("../assets/icons/clock.svg"), label: "CLOCK" },
-        { icon: Qt.resolvedUrl("../assets/icons/setting.svg"), label: "SETTINGS" }
+        { icon: Qt.resolvedUrl("../assets/icons/setting.svg"), label: "SETTINGS" },
+        { icon: Qt.resolvedUrl("../assets/icons/power.svg"), label: "POWER" }
     ]
 
     // ----- animators --------------------------------------------------------
@@ -68,6 +69,12 @@ Item {
     property real clockDraw: 0
     property real settings: 0
     property real settingsDraw: 0
+    // The dock is a pair: itself and the media island under it. They arrive
+    // and leave as one thing, a beat apart.
+    property real power: 0
+    property real powerDraw: 0
+    property real media: 0
+    property real mediaDraw: 0
     property real toast: 0
     property real toastDraw: 0
     // 1..0 over the toast's hold. The animation is the clock: when it finishes
@@ -83,6 +90,7 @@ Item {
     readonly property bool launcherOpen: section === 0
     readonly property bool clockOpen: section === 1
     readonly property bool settingsOpen: section === 2
+    readonly property bool powerOpen: section === 3
 
     // ----- hover ------------------------------------------------------------
 
@@ -178,20 +186,54 @@ Item {
     SequentialAnimation {
         id: dockIn
         PauseAnimation { id: dockInDelay }
-        NumberAnimation {
-            target: bar; property: "dock"; to: 1
-            duration: Theme.socketEmergeMs
-            easing.type: Easing.BezierSpline
-            easing.bezierCurve: Theme.dockCurve
+        ParallelAnimation {
+            NumberAnimation {
+                target: bar; property: "dock"; to: 1
+                duration: Theme.socketEmergeMs
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Theme.dockCurve
+            }
+            // The second box of the same thing: extruded out of the first one
+            // rather than announced separately.
+            SequentialAnimation {
+                PauseAnimation { duration: Theme.mediaTrailMs }
+                ParallelAnimation {
+                    NumberAnimation {
+                        target: bar; property: "media"; to: 1
+                        duration: Theme.socketEmergeMs
+                        easing.type: Easing.BezierSpline
+                        easing.bezierCurve: Theme.dockCurve
+                    }
+                    NumberAnimation {
+                        target: bar; property: "mediaDraw"; to: 1
+                        duration: Theme.durMediaDraw
+                        easing.type: Easing.Linear
+                    }
+                }
+            }
         }
     }
 
-    NumberAnimation {
+    // Leaving together, with no trail: the pair is absorbed, not unstacked.
+    ParallelAnimation {
         id: dockOut
-        target: bar; property: "dock"; to: 0
-        duration: Theme.socketRetractMs
-        easing.type: Easing.BezierSpline
-        easing.bezierCurve: Theme.dockCurve
+        NumberAnimation {
+            target: bar; property: "dock"; to: 0
+            duration: Theme.socketRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+        NumberAnimation {
+            target: bar; property: "media"; to: 0
+            duration: Theme.socketRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+        NumberAnimation {
+            target: bar; property: "mediaDraw"; to: 0
+            duration: Theme.durMediaUndraw
+            easing.type: Easing.Linear
+        }
     }
 
     // A panel's contents start with the panel, as the dock's do.
@@ -361,6 +403,39 @@ Item {
         onFinished: Notifications.dismissToast()
     }
 
+    SequentialAnimation {
+        id: powerIn
+        PauseAnimation { id: powerInDelay }
+        ParallelAnimation {
+            NumberAnimation {
+                target: bar; property: "power"; to: 1
+                duration: Theme.socketEmergeMs
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Theme.dockCurve
+            }
+            NumberAnimation {
+                target: bar; property: "powerDraw"; to: 1
+                duration: Theme.durPowerDraw
+                easing.type: Easing.Linear
+            }
+        }
+    }
+
+    ParallelAnimation {
+        id: powerOut
+        NumberAnimation {
+            target: bar; property: "power"; to: 0
+            duration: Theme.socketRetractMs
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.dockCurve
+        }
+        NumberAnimation {
+            target: bar; property: "powerDraw"; to: 0
+            duration: Theme.durPowerUndraw
+            easing.type: Easing.Linear
+        }
+    }
+
     // The socket, addressed by section index: -1 is the dock, 0 and up are the
     // menu's tiles in order. An arrival is not one of them -- it appears below
     // whatever is in the socket rather than instead of it, so it has its own
@@ -371,17 +446,18 @@ Item {
     property int occupant: socketNone
     function islandIn(which) {
         return which === 0 ? launcherIn : which === 1 ? clockIn
-            : which === 2 ? settingsIn : dockIn;
+            : which === 2 ? settingsIn : which === 3 ? powerIn : dockIn;
     }
 
     function islandInDelay(which) {
         return which === 0 ? launcherInDelay : which === 1 ? clockInDelay
-            : which === 2 ? settingsInDelay : dockInDelay;
+            : which === 2 ? settingsInDelay
+            : which === 3 ? powerInDelay : dockInDelay;
     }
 
     function islandOut(which) {
         return which === 0 ? launcherOut : which === 1 ? clockOut
-            : which === 2 ? settingsOut : dockOut;
+            : which === 2 ? settingsOut : which === 3 ? powerOut : dockOut;
     }
 
     function stopSocket() {
@@ -389,6 +465,7 @@ Item {
         launcherIn.stop(); launcherOut.stop();
         clockIn.stop(); clockOut.stop();
         settingsIn.stop(); settingsOut.stop(); settingsPaneIn.stop();
+        powerIn.stop(); powerOut.stop();
     }
 
     // Whatever is in the socket leaves and the next thing arrives. The same
@@ -420,6 +497,7 @@ Item {
         launcherOut.restart();
         clockOut.restart();
         settingsOut.restart();
+        powerOut.restart();
     }
 
     // ----- arrivals ---------------------------------------------------------
@@ -500,7 +578,7 @@ Item {
 
     // A tile either owns a panel here or is still only a signal to the shell.
     function chooseSection(index) {
-        if (index > 2) {
+        if (index > 3) {
             sectionRequested(index);
             return;
         }
@@ -518,6 +596,8 @@ Item {
             clockIsland.reset();
         else if (next === 2)
             settingsIsland.reset();
+        else if (next === 3)
+            powerIsland.reset();
         swapSocket(next, Theme.socketAdmitMs);
     }
 
@@ -654,6 +734,23 @@ Item {
     readonly property real settingsContentY:
         settingsY + (settingsH - Theme.settingsHeight) / 2
 
+    // ----- the power island -------------------------------------------------
+
+    readonly property real powerW: Theme.powerWidth * power
+    readonly property real powerH: Theme.powerHeight * power
+    readonly property real powerR: Theme.cornerRadius(
+        Theme.powerRadius, powerW, powerH)
+    readonly property real powerX: blobX + (shapeW - powerW) / 2
+    readonly property real powerCenterY: Theme.mix(
+        blobY + shapeH - Theme.dockEmergeDepth,
+        blobY + shapeH + Theme.dockGap + Theme.powerHeight / 2,
+        power)
+    readonly property real powerY: powerCenterY - powerH / 2
+    readonly property bool powerVisible: power > 0.001
+
+    readonly property real powerContentX: powerX + (powerW - Theme.powerWidth) / 2
+    readonly property real powerContentY: powerY + (powerH - Theme.powerHeight) / 2
+
     // ----- the toast island -------------------------------------------------
     //
     // Narrower than the panels, because it comes out of the shape above it
@@ -665,9 +762,11 @@ Item {
     readonly property real socketBottom: Math.max(
         blobY + shapeH,
         dockVisible ? dockY + dockH : 0,
+        mediaVisible ? mediaY + mediaH : 0,
         launcherVisible ? launcherY + launcherH : 0,
         clockVisible ? clockY + clockH : 0,
-        settingsVisible ? settingsY + settingsH : 0)
+        settingsVisible ? settingsY + settingsH : 0,
+        powerVisible ? powerY + powerH : 0)
 
     readonly property real toastW: Theme.toastWidth * toast
     readonly property real toastH: Theme.toastHeight * toast
@@ -687,6 +786,27 @@ Item {
     // has to be able to travel over.
     readonly property real lowerBottom: Math.max(
         socketBottom, toastVisible ? toastY + toastH : 0)
+
+    // ----- the media island -------------------------------------------------
+    //
+    // Born out of the dock's lower edge on the same terms the dock is born out
+    // of the menu's, and it follows the dock while the dock is still growing.
+
+    readonly property real dockBottom: dockY + dockH
+    readonly property real mediaW: Theme.mediaWidth * media
+    readonly property real mediaH: Theme.mediaHeight * media
+    readonly property real mediaR: Theme.cornerRadius(
+        Theme.mediaRadius, mediaW, mediaH)
+    readonly property real mediaX: blobX + (shapeW - mediaW) / 2
+    readonly property real mediaCenterY: Theme.mix(
+        dockBottom - Theme.dockEmergeDepth,
+        dockBottom + Theme.dockGap + Theme.mediaHeight / 2,
+        media)
+    readonly property real mediaY: mediaCenterY - mediaH / 2
+    readonly property bool mediaVisible: media > 0.001
+
+    readonly property real mediaContentX: mediaX + (mediaW - Theme.mediaWidth) / 2
+    readonly property real mediaContentY: mediaY + (mediaH - Theme.mediaHeight) / 2
 
     readonly property var trayItems: SystemTray.items.values
 
@@ -869,6 +989,49 @@ Item {
             && ly >= Theme.settingsListY && ly <= Theme.settingsHeight;
     }
 
+    readonly property bool powerInteractive: powerVisible
+        && Theme.powerPhase(powerDraw, Theme.drawPowerFrame, 0) > 0.5
+
+    function powerTileAt(px, py) {
+        if (!powerInteractive)
+            return -1;
+        return powerIsland.tileAt(px - (powerContentX - blobX),
+                                  py - (powerContentY - blobY));
+    }
+
+    // ----- the media island's controls --------------------------------------
+
+    readonly property bool mediaInteractive: mediaVisible
+        && Theme.mediaPhase(mediaDraw, Theme.drawMediaRow, 0) > 0.5
+
+    function mediaLocalX(px) { return px - (mediaContentX - blobX); }
+    function mediaLocalY(py) { return py - (mediaContentY - blobY); }
+
+    function mediaIconAt(px, py) {
+        return mediaInteractive
+            ? mediaIsland.iconAt(mediaLocalX(px), mediaLocalY(py)) : -1;
+    }
+
+    function mediaDeviceAt(px, py) {
+        return mediaInteractive
+            ? mediaIsland.deviceAt(mediaLocalX(px), mediaLocalY(py)) : -1;
+    }
+
+    function mediaSliderAt(px, py) {
+        return mediaInteractive
+            ? mediaIsland.sliderAt(mediaLocalX(px), mediaLocalY(py)) : -1;
+    }
+
+    function mediaControlAt(px, py) {
+        return mediaInteractive
+            ? mediaIsland.controlAt(mediaLocalX(px), mediaLocalY(py)) : -1;
+    }
+
+    function mediaSeekAt(px, py) {
+        return mediaInteractive
+            && mediaIsland.seekAt(mediaLocalX(px), mediaLocalY(py));
+    }
+
     // An arriving notification is one target, not several: the whole island
     // answers it.
     function overToast(px, py) {
@@ -949,6 +1112,19 @@ Item {
         readonly property int hoverSettingClose: containsMouse ? bar.settingsCloseAt(mouseX, mouseY) : -1
         readonly property int hoverSettingScroll: containsMouse ? bar.settingsScrollAt(mouseX, mouseY) : -1
         readonly property bool hoverToast: containsMouse && bar.overToast(mouseX, mouseY)
+        readonly property int hoverMediaIcon: containsMouse ? bar.mediaIconAt(mouseX, mouseY) : -1
+        readonly property int hoverMediaDevice: containsMouse ? bar.mediaDeviceAt(mouseX, mouseY) : -1
+        readonly property int hoverMediaControl: containsMouse ? bar.mediaControlAt(mouseX, mouseY) : -1
+        readonly property bool hoverMediaSeek: containsMouse && bar.mediaSeekAt(mouseX, mouseY)
+        readonly property int hoverMediaSlider: containsMouse ? bar.mediaSliderAt(mouseX, mouseY) : -1
+        readonly property int hoverPowerTile: containsMouse ? bar.powerTileAt(mouseX, mouseY) : -1
+
+        // A slider is dragged, not only clicked, so the press is what starts
+        // it and the release is what ends it. The click that follows has
+        // already been answered by then.
+        property int dragRow: -1
+        property bool dragSeek: false
+        property bool pressConsumed: false
 
         onHoverToastChanged: bar.holdToast(hoverToast)
 
@@ -957,6 +1133,9 @@ Item {
         cursorShape: hoverColumn >= 0 || hoverTray >= 0 || hoverRow >= 0
             || hoverControl >= 0 || hoverTab >= 0 || hoverSetting >= 0
             || hoverSettingRow >= 0 || hoverSettingScroll >= 0
+            || hoverMediaIcon >= 0 || hoverMediaDevice >= 0
+            || hoverMediaControl >= 0 || hoverMediaSlider >= 0 || hoverMediaSeek
+            || hoverPowerTile >= 0
             || hoverToast || bar.onHandle(mouseX, mouseY)
             ? Qt.PointingHandCursor : Qt.ArrowCursor
 
@@ -972,6 +1151,35 @@ Item {
         onPositionChanged: (event) => {
             if (bar.mode === 0 && event.y <= bar.shapeH)
                 bar.mode = 1;
+            if (pressed && dragRow >= 0)
+                mediaIsland.setRow(dragRow,
+                    mediaIsland.fractionAt(bar.mediaLocalX(event.x)));
+        }
+
+        onPressed: (event) => {
+            dragRow = -1;
+            dragSeek = false;
+            if (event.button !== Qt.LeftButton)
+                return;
+            var slider = bar.mediaSliderAt(event.x, event.y);
+            if (slider >= 0) {
+                dragRow = slider;
+                mediaIsland.setRow(slider,
+                    mediaIsland.fractionAt(bar.mediaLocalX(event.x)));
+            } else if (bar.mediaSeekAt(event.x, event.y)) {
+                // Seeking lands once, on release: a player asked to seek every
+                // frame of a drag spends the drag buffering.
+                dragSeek = true;
+            }
+            pressConsumed = dragRow >= 0 || dragSeek;
+        }
+
+        onReleased: (event) => {
+            if (dragSeek)
+                Media.seekFraction(
+                    mediaIsland.seekFractionAt(bar.mediaLocalX(event.x)));
+            dragRow = -1;
+            dragSeek = false;
         }
         // A single layer surface cannot see clicks outside itself, so leaving
         // the silhouette is what dismisses the menu. The grace period keeps a
@@ -1016,6 +1224,31 @@ Item {
         }
 
         onClicked: (event) => {
+            // A drag already answered this press.
+            if (pressConsumed) {
+                pressConsumed = false;
+                return;
+            }
+            var mediaIcon = bar.mediaIconAt(event.x, event.y);
+            if (mediaIcon >= 0) {
+                mediaIsland.activateIcon(mediaIcon);
+                return;
+            }
+            var mediaDevice = bar.mediaDeviceAt(event.x, event.y);
+            if (mediaDevice >= 0) {
+                mediaIsland.activateDevice(mediaDevice);
+                return;
+            }
+            var transport = bar.mediaControlAt(event.x, event.y);
+            if (transport >= 0) {
+                mediaIsland.activateControl(transport);
+                return;
+            }
+            var powerTile = bar.powerTileAt(event.x, event.y);
+            if (powerTile >= 0) {
+                powerIsland.activate(powerTile);
+                return;
+            }
             // The arrival answers first: it is the thing that just interrupted.
             if (bar.overToast(event.x, event.y)) {
                 if (event.button === Qt.RightButton)
@@ -1132,6 +1365,20 @@ Item {
                 width: bar.settingsW
                 height: bar.settingsH
                 radius: bar.settingsR
+            },
+            LiquidShape {
+                x: bar.powerX
+                y: bar.powerY
+                width: bar.powerW
+                height: bar.powerH
+                radius: bar.powerR
+            },
+            LiquidShape {
+                x: bar.mediaX
+                y: bar.mediaY
+                width: bar.mediaW
+                height: bar.mediaH
+                radius: bar.mediaR
             },
             LiquidShape {
                 x: bar.toastX
@@ -1398,5 +1645,32 @@ Item {
         life: bar.toastLife
         hovered: hit.hoverToast
         notification: bar.toastItem
+    }
+
+    MediaIsland {
+        id: mediaIsland
+        x: bar.mediaX
+        y: bar.mediaY
+        width: bar.mediaW
+        height: bar.mediaH
+        visible: bar.mediaVisible
+
+        draw: bar.mediaDraw
+        hoveredIcon: hit.hoverMediaIcon
+        hoveredDevice: hit.hoverMediaDevice
+        hoveredControl: hit.hoverMediaControl
+        hoveredSeek: hit.hoverMediaSeek
+    }
+
+    PowerIsland {
+        id: powerIsland
+        x: bar.powerX
+        y: bar.powerY
+        width: bar.powerW
+        height: bar.powerH
+        visible: bar.powerVisible
+
+        draw: bar.powerDraw
+        hovered: hit.hoverPowerTile
     }
 }

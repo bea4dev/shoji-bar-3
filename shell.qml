@@ -124,6 +124,40 @@ ShellRoot {
                 }
 
                 Region {
+                    x: Math.round(bar.powerX)
+                    y: Math.round(bar.powerY)
+                    width: Math.round(bar.powerW)
+                    height: Math.round(bar.powerH)
+                    radius: Math.round(bar.powerR)
+                }
+
+                Region {
+                    readonly property int top: Math.round(bar.blobY + bar.shapeH) - 1
+                    x: Math.round(bar.powerX)
+                    y: top
+                    width: Math.round(bar.powerW)
+                    height: Math.max(0, Math.round(bar.powerY) - top + 1)
+                }
+
+                Region {
+                    x: Math.round(bar.mediaX)
+                    y: Math.round(bar.mediaY)
+                    width: Math.round(bar.mediaW)
+                    height: Math.round(bar.mediaH)
+                    radius: Math.round(bar.mediaR)
+                }
+
+                // The dock's pair: the neck between the two boxes it is made
+                // of, so the pointer can cross from one to the other.
+                Region {
+                    readonly property int top: Math.round(bar.dockBottom) - 1
+                    x: Math.round(bar.mediaX)
+                    y: top
+                    width: Math.round(bar.mediaW)
+                    height: Math.max(0, Math.round(bar.mediaY) - top + 1)
+                }
+
+                Region {
                     x: Math.round(bar.toastX)
                     y: Math.round(bar.toastY)
                     width: Math.round(bar.toastW)

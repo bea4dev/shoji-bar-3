@@ -41,7 +41,7 @@ var blendRadius = 40;
 
 // Column centres as a fraction of the silhouette width, shared by the peek
 // chevrons and the menu tiles so the two states line up during the morph.
-var columns = [0.25, 0.5, 0.75];
+var columns = [0.2, 0.4, 0.6, 0.8];
 
 var clockCenterCollapsed = 14;
 var clockCenterPeek = 17;
@@ -96,6 +96,113 @@ var trayIconGap = 16;
 // 0 keeps them exactly as their applications authored them; 1 renders them as
 // line work like everything else, at the cost of telling them apart.
 var trayDesaturate = 0.0;
+
+// ---------------------------------------------------------------------------
+// Power island: the fourth section panel
+// ---------------------------------------------------------------------------
+//
+// Three ways to end the session, as three of the menu's own tiles at a larger
+// size. A frame that is drawn rather than an icon that merely appears is what
+// gives the panel something to animate, and it is the vocabulary the menu
+// already uses one island up.
+var powerWidth = dockWidth;
+var powerRadius = dockRadius;
+var powerPadX = 24;
+var powerPadTop = 20;
+var powerPadBottom = 22;
+
+// The rule the tiles hang from, as in the menu.
+var powerAxisY = powerPadTop + 8;
+var powerTileY = powerAxisY + 26;
+var powerTileSize = 72;
+var powerTileRadius = 20;
+var powerIconSize = 28;
+var powerLabelGap = 18;
+var powerColumns = [0.2, 0.5, 0.8];
+// Longest caption, including the one an armed tile shows.
+var powerLabelChars = 11;
+
+var powerLabelY = powerTileY + powerTileSize + powerLabelGap;
+var powerHeight = powerLabelY + 14 + powerPadBottom;
+
+// What each tile does. Written here so the commands are one line to change,
+// and so nothing in the QML has to know how a session ends on this machine.
+var powerActions = [
+    { label: "POWER OFF", icon: "power", command: ["systemctl", "poweroff"] },
+    { label: "RESTART", icon: "restart", command: ["systemctl", "reboot"] },
+    { label: "LOG OUT", icon: "logout",
+      command: ["sh", "-c", "loginctl terminate-session \"${XDG_SESSION_ID:-self}\""] }
+];
+
+// Ending a session is not something to do on a slipped click: the first press
+// arms a tile and the second one carries it out. This is what an armed tile
+// says instead of its name.
+var powerArmedLabel = "PRESS AGAIN";
+
+// Centre of one tile, from the island's left edge.
+function powerTileX(index) {
+    return powerColumns[index] * powerWidth;
+}
+
+// ---------------------------------------------------------------------------
+// Media island: the dock's second half, below it
+// ---------------------------------------------------------------------------
+//
+// Not a section panel: it arrives and leaves with the dock, as one thing in
+// two boxes. The dock reads what the machine is doing to itself -- charge,
+// tray -- and this reads what it is doing for you: how loud, how bright, what
+// is playing.
+var mediaWidth = dockWidth;
+var mediaRadius = dockRadius;
+var mediaPadX = 20;
+var mediaPadTop = 16;
+var mediaPadBottom = 16;
+
+// Two instrument rows, each an icon, a slider, a reading and the device the
+// row is driving.
+var mediaRows = 2;
+var mediaRowHeight = 28;
+var mediaIconSize = 18;
+var mediaIconX = mediaPadX + 9;
+var mediaSliderX = mediaPadX + 30;
+var mediaSliderWidth = 160;
+var mediaValueWidth = 34;
+var mediaDeviceWidth = 104;
+var mediaDeviceChars = 14;
+
+var mediaRuleY = mediaPadTop + mediaRows * mediaRowHeight + 8;
+
+// What is playing. The cover is the one picture in the bar besides an
+// arrival's sender, and it earns its place the same way.
+var mediaArtY = mediaRuleY + 10;
+var mediaArtSize = 56;
+var mediaArtRadius = 12;
+var mediaTextX = mediaPadX + mediaArtSize + 14;
+var mediaTitleY = mediaArtY + 4;
+var mediaArtistY = mediaTitleY + 18;
+var mediaSeekY = mediaArtY + mediaArtSize - 8;
+var mediaTitleChars = 22;
+var mediaArtistChars = 24;
+
+// Previous, play/pause, next.
+var mediaControls = 3;
+var mediaControlSize = 16;
+var mediaControlStep = 26;
+var mediaControlY = mediaTitleY + 10;
+var mediaControlInset = mediaPadX + 8;
+
+var mediaHeight = mediaSeekY + 22 + mediaPadBottom;
+
+// Centre of one transport control, from the island's left edge.
+function mediaControlX(index) {
+    return mediaWidth - mediaControlInset
+        - (mediaControls - 1 - index) * mediaControlStep;
+}
+
+// Centre line of one instrument row.
+function mediaRowY(index) {
+    return mediaPadTop + index * mediaRowHeight + mediaRowHeight / 2;
+}
 
 // ---------------------------------------------------------------------------
 // Launcher island: the first section panel, shown in the dock's place
@@ -401,8 +508,11 @@ var menuRadiusPopup = 14;
 var surfaceWidth = menuWidth + surfacePad * 2;
 // Sized for the taller of the two lower islands, since they share the socket
 // and the surface itself is never resized.
-var lowerIslandHeight = Math.max(dockHeight, launcherHeight, clockHeight,
-                                 settingsHeight);
+// The dock occupies the socket as a pair: itself, a gap, and the media island
+// under it.
+var dockPairHeight = dockHeight + dockGap + mediaHeight;
+var lowerIslandHeight = Math.max(dockPairHeight, launcherHeight, clockHeight,
+                                 settingsHeight, powerHeight);
 // An arrival appears below whatever the socket is showing, never instead of
 // it, so the surface has to hold the tallest panel and a toast underneath it.
 var surfaceHeight = screenPad + menuHeight + dockGap + lowerIslandHeight
@@ -730,28 +840,59 @@ var sectionSwapOverlapMs = shapeMs(140);
 // When the incoming island starts, measured from the beginning of a swap.
 var socketAdmitMs = Math.max(0, socketRetractMs - sectionSwapOverlapMs);
 
+// ---------------------------------------------------------------------------
+// How the panels' schedules are spaced
+// ---------------------------------------------------------------------------
+//
+// The main menu reads as being drawn rather than as appearing, and most of
+// that is spacing: its stages start well apart -- the date, then the axis,
+// then the drop lines, then the frames -- and each column trails the one to
+// its left. The panels were written tighter than that and arrived as a lump.
+//
+// These are the knobs that give them the menu's spacing. Every panel below
+// puts its stage starts through `spread` and trails its items by one of the
+// two steps, so the whole set moves together.
+//
+//   panelSpread      multiplies every panel stage's START, never its length:
+//                    the strokes keep their own speed and only begin further
+//                    apart. 1.0 is the schedules as they were written.
+//   panelLeadInMs    dead time after a panel starts moving, before the first
+//                    stroke. The menu's own lead-in.
+//   panelStepMs      how far each item trails the previous one where there
+//                    are only a few: tiles, tabs, instrument rows. The menu's
+//                    own column step.
+//   panelRowStepMs   the same for a list, where there are many more of them
+//                    and the menu's step would make the list crawl.
+
+var panelSpread = 2.0;
+var panelLeadInMs = drawLeadInMs;
+var panelStepMs = drawColumnStepMs;
+var panelRowStepMs = 60;
+
+function spread(at) {
+    return Math.round(at * panelSpread);
+}
+
 // Each panel's own pen schedule, on its own driver. The menu's schedule cannot
 // carry them: that one is measured from the click, and a panel is drawn on a
 // gesture that happens some unknown time later.
 //
-//   launcherLeadInMs   dead time after the panel starts moving
-//   launcherRowStepMs  how far each row trails the one above it
-//   <stage>.stagger    whether the stage repeats per row
+//   <stage>.stagger   whether the stage repeats per row
 
-var launcherLeadInMs = 100;
-var launcherRowStepMs = 60;
+var launcherLeadInMs = panelLeadInMs;
+var launcherRowStepMs = panelRowStepMs;
 
 // One notch of a mouse wheel, in the eighths of a degree Qt reports. A
 // touchpad sends pixels instead and is measured against the row height, so the
 // two devices move the same list at the same rate.
 var wheelNotch = 120;
 
-var drawLauncherPrompt = { at: 0, ms: 220 };
-var drawLauncherQuery = { at: 100, ms: 200 };
-var drawLauncherAxis = { at: 160, ms: 520 };
-var drawLauncherRail = { at: 340, ms: 480 };
-var drawLauncherCount = { at: 420, ms: typeMs(launcherCountChars) };
-var drawLauncherRow = { at: 520, ms: 300, stagger: true };
+var drawLauncherPrompt = { at: spread(0), ms: 220 };
+var drawLauncherQuery = { at: spread(100), ms: 200 };
+var drawLauncherAxis = { at: spread(160), ms: 520 };
+var drawLauncherRail = { at: spread(340), ms: 480 };
+var drawLauncherCount = { at: spread(420), ms: typeMs(launcherCountChars) };
+var drawLauncherRow = { at: spread(520), ms: 300, stagger: true };
 
 // The icon only fades, and lands as its own row's branch finishes, the way the
 // menu's glyphs land with their frames.
@@ -798,16 +939,16 @@ function launcherPhase(t, stage, index) {
 // the day it sits in, then the month that day sits in. The bracket around
 // today is drawn last, as the answer to the grid rather than part of it.
 
-var clockLeadInMs = 100;
-var clockRowStepMs = 55;
+var clockLeadInMs = panelLeadInMs;
+var clockRowStepMs = panelRowStepMs;
 
-var drawClockNow = { at: 0, ms: typeMs(clockNowChars) };
-var drawClockStamp = { at: 140, ms: typeMs(clockStampChars) };
-var drawClockAxis = { at: 200, ms: 560 };
-var drawClockHours = { at: 560, ms: 280 };
-var drawClockMonth = { at: 480, ms: typeMs(clockMonthChars) };
-var drawClockWeekdays = { at: 640, ms: 300 };
-var drawClockRow = { at: 780, ms: 320, stagger: true };
+var drawClockNow = { at: spread(0), ms: typeMs(clockNowChars) };
+var drawClockStamp = { at: spread(140), ms: typeMs(clockStampChars) };
+var drawClockAxis = { at: spread(200), ms: 560 };
+var drawClockHours = { at: spread(560), ms: 280 };
+var drawClockMonth = { at: spread(480), ms: typeMs(clockMonthChars) };
+var drawClockWeekdays = { at: spread(640), ms: 300 };
+var drawClockRow = { at: spread(780), ms: 320, stagger: true };
 
 var drawClockTodayMs = 300;
 var drawClockToday = {
@@ -833,6 +974,52 @@ var clockScheduleMs = Math.max(
 var durClockDraw = Math.round(clockScheduleMs * drawTempo);
 var durClockUndraw = Math.round(durClockDraw * drawUndrawRatio);
 
+// ----- the power panel's pen schedule ---------------------------------------
+//
+// One tile at a time, left to right: the rule, the tick that ties a tile to
+// it, the frame, then the glyph landing as its own frame closes and the
+// caption written under it.
+
+var powerLeadInMs = panelLeadInMs;
+var powerTileStepMs = panelStepMs;
+
+var drawPowerAxis = { at: spread(0), ms: 460 };
+var drawPowerDrop = { at: spread(260), ms: 240, stagger: true };
+var drawPowerFrame = { at: spread(380), ms: 620, stagger: true };
+var drawPowerGlyphMs = 300;
+var drawPowerGlyph = {
+    at: drawPowerFrame.at + drawPowerFrame.ms - drawPowerGlyphMs,
+    ms: drawPowerGlyphMs,
+    stagger: true
+};
+var drawPowerLabel = {
+    at: drawPowerFrame.at + drawPowerFrame.ms + 20,
+    ms: typeMs(powerLabelChars),
+    stagger: true
+};
+
+function powerStageStart(stage, index) {
+    return powerLeadInMs + stage.at
+        + (stage.stagger ? (index || 0) * powerTileStepMs : 0);
+}
+
+function powerStageEnd(stage) {
+    return powerStageStart(stage, powerColumns.length - 1) + stage.ms;
+}
+
+var powerScheduleMs = Math.max(
+    powerStageEnd(drawPowerAxis), powerStageEnd(drawPowerDrop),
+    powerStageEnd(drawPowerFrame), powerStageEnd(drawPowerGlyph),
+    powerStageEnd(drawPowerLabel));
+
+var durPowerDraw = Math.round(powerScheduleMs * drawTempo);
+var durPowerUndraw = Math.round(durPowerDraw * drawUndrawRatio);
+
+function powerPhase(t, stage, index) {
+    var at = powerStageStart(stage, index);
+    return remap(t * powerScheduleMs, at, at + stage.ms);
+}
+
 // Progress of one clock stage, given that panel's 0..1 driver.
 function clockPhase(t, stage, index) {
     var at = clockStageStart(stage, index);
@@ -846,13 +1033,13 @@ function clockPhase(t, stage, index) {
 // section is chosen, and a section swap must not redraw the tabs that did the
 // choosing.
 
-var settingsLeadInMs = 100;
-var settingsTabStepMs = 70;
+var settingsLeadInMs = panelLeadInMs;
+var settingsTabStepMs = panelStepMs;
 
-var drawSettingsIcon = { at: 0, ms: 260, stagger: true };
-var drawSettingsLabel = { at: 160, ms: typeMs(settingsTabChars), stagger: true };
-var drawSettingsRule = { at: 360, ms: 520 };
-var drawSettingsDrop = { at: 760, ms: 220 };
+var drawSettingsIcon = { at: spread(0), ms: 260, stagger: true };
+var drawSettingsLabel = { at: spread(160), ms: typeMs(settingsTabChars), stagger: true };
+var drawSettingsRule = { at: spread(360), ms: 520 };
+var drawSettingsDrop = { at: spread(760), ms: 220 };
 
 function settingsStageStart(stage, index) {
     return settingsLeadInMs + stage.at
@@ -877,13 +1064,13 @@ function settingsPhase(t, stage, index) {
 
 // The pane's own schedule, on its own driver. The list is plotted row by row,
 // the way the launcher's results and the clock's weeks are.
-var settingsRowStepMs = 55;
+var settingsRowStepMs = panelRowStepMs;
 
-var drawPaneTitle = { at: 0, ms: typeMs(settingsTitleChars) };
-var drawPaneControl = { at: 140, ms: 300 };
-var drawPaneRule = { at: 200, ms: 480 };
-var drawPaneDetail = { at: 380, ms: typeMs(settingsDetailChars) };
-var drawPaneRow = { at: 300, ms: 300, stagger: true };
+var drawPaneTitle = { at: spread(0), ms: typeMs(settingsTitleChars) };
+var drawPaneControl = { at: spread(140), ms: 300 };
+var drawPaneRule = { at: spread(200), ms: 480 };
+var drawPaneDetail = { at: spread(380), ms: typeMs(settingsDetailChars) };
+var drawPaneRow = { at: spread(300), ms: 300, stagger: true };
 
 function paneStageEnd(stage) {
     return stage.at + stage.ms
@@ -940,6 +1127,54 @@ var durToastUndraw = Math.round(durToastDraw * drawUndrawRatio);
 function toastPhase(t, stage) {
     var at = toastLeadInMs + stage.at;
     return remap(t * toastScheduleMs, at, at + stage.ms);
+}
+
+// ----- the media island's pen schedule --------------------------------------
+//
+// Its own driver, like a panel's: the dock's contents ride the menu's
+// schedule, but this island arrives a beat after the dock and its strokes have
+// to be measured from its own start rather than from the click.
+
+var mediaLeadInMs = panelLeadInMs;
+var mediaRowStepMs = panelStepMs;
+
+var drawMediaRow = { at: spread(0), ms: 420, stagger: true };
+var drawMediaIcon = { at: spread(120), ms: 260, stagger: true };
+var drawMediaValue = { at: spread(220), ms: typeMs(4), stagger: true };
+var drawMediaDevice = { at: spread(300), ms: typeMs(mediaDeviceChars), stagger: true };
+var drawMediaRule = { at: spread(420), ms: 460 };
+var drawMediaArt = { at: spread(560), ms: 320 };
+var drawMediaTitle = { at: spread(620), ms: typeMs(mediaTitleChars) };
+var drawMediaArtist = { at: spread(700), ms: typeMs(mediaArtistChars) };
+var drawMediaSeek = { at: spread(820), ms: 420 };
+var drawMediaControls = { at: spread(900), ms: 300 };
+
+function mediaStageStart(stage, index) {
+    return mediaLeadInMs + stage.at
+        + (stage.stagger ? (index || 0) * mediaRowStepMs : 0);
+}
+
+function mediaStageEnd(stage) {
+    return mediaStageStart(stage, mediaRows - 1) + stage.ms;
+}
+
+var mediaScheduleMs = Math.max(
+    mediaStageEnd(drawMediaRow), mediaStageEnd(drawMediaIcon),
+    mediaStageEnd(drawMediaValue), mediaStageEnd(drawMediaDevice),
+    mediaStageEnd(drawMediaRule), mediaStageEnd(drawMediaArt),
+    mediaStageEnd(drawMediaTitle), mediaStageEnd(drawMediaArtist),
+    mediaStageEnd(drawMediaSeek), mediaStageEnd(drawMediaControls));
+
+var durMediaDraw = Math.round(mediaScheduleMs * drawTempo);
+var durMediaUndraw = Math.round(durMediaDraw * drawUndrawRatio);
+
+// How far the media island trails the dock it belongs to. They are one thing
+// in two boxes, so this is a beat, not a separate entrance.
+var mediaTrailMs = shapeMs(120);
+
+function mediaPhase(t, stage, index) {
+    var at = mediaStageStart(stage, index);
+    return remap(t * mediaScheduleMs, at, at + stage.ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,7 +1371,10 @@ function roundedRectPath(w, h, r, progress) {
         launcherHeight: launcherHeight,
         lowerIslandHeight: lowerIslandHeight,
         clockHeight: clockHeight,
+        powerHeight: powerHeight,
         settingsHeight: settingsHeight,
+        mediaHeight: mediaHeight,
+        dockPairHeight: dockPairHeight,
         toastHeight: toastHeight,
         socketEmergeMs: socketEmergeMs,
         socketRetractMs: socketRetractMs,
@@ -1145,12 +1383,19 @@ function roundedRectPath(w, h, r, progress) {
         durLauncherDraw: durLauncherDraw,
         durLauncherUndraw: durLauncherUndraw,
         launcherGraceMs: launcherGraceMs,
+        panelSpread: panelSpread,
+        panelLeadInMs: panelLeadInMs,
+        panelStepMs: panelStepMs,
+        panelRowStepMs: panelRowStepMs,
         launcherPadX: launcherPadX,
         launcherRowsY: launcherRowsY,
         wheelNotch: wheelNotch,
         clockScheduleMs: clockScheduleMs,
         durClockDraw: durClockDraw,
         durClockUndraw: durClockUndraw,
+        powerScheduleMs: powerScheduleMs,
+        durPowerDraw: durPowerDraw,
+        durPowerUndraw: durPowerUndraw,
         settingsScheduleMs: settingsScheduleMs,
         durSettingsDraw: durSettingsDraw,
         durSettingsUndraw: durSettingsUndraw,
@@ -1160,7 +1405,11 @@ function roundedRectPath(w, h, r, progress) {
         settingsPaneLeadMs: settingsPaneLeadMs,
         toastScheduleMs: toastScheduleMs,
         durToastDraw: durToastDraw,
-        durToastUndraw: durToastUndraw
+        durToastUndraw: durToastUndraw,
+        mediaScheduleMs: mediaScheduleMs,
+        durMediaDraw: durMediaDraw,
+        durMediaUndraw: durMediaUndraw,
+        mediaTrailMs: mediaTrailMs
     };
 
     var stages = {
@@ -1186,6 +1435,11 @@ function roundedRectPath(w, h, r, progress) {
         drawClockWeekdays: drawClockWeekdays,
         drawClockRow: drawClockRow,
         drawClockToday: drawClockToday,
+        drawPowerAxis: drawPowerAxis,
+        drawPowerDrop: drawPowerDrop,
+        drawPowerFrame: drawPowerFrame,
+        drawPowerGlyph: drawPowerGlyph,
+        drawPowerLabel: drawPowerLabel,
         drawSettingsIcon: drawSettingsIcon,
         drawSettingsLabel: drawSettingsLabel,
         drawSettingsRule: drawSettingsRule,
@@ -1200,7 +1454,17 @@ function roundedRectPath(w, h, r, progress) {
         drawToastRule: drawToastRule,
         drawToastSummary: drawToastSummary,
         drawToastBody: drawToastBody,
-        drawToastImage: drawToastImage
+        drawToastImage: drawToastImage,
+        drawMediaRow: drawMediaRow,
+        drawMediaIcon: drawMediaIcon,
+        drawMediaValue: drawMediaValue,
+        drawMediaDevice: drawMediaDevice,
+        drawMediaRule: drawMediaRule,
+        drawMediaArt: drawMediaArt,
+        drawMediaTitle: drawMediaTitle,
+        drawMediaArtist: drawMediaArtist,
+        drawMediaSeek: drawMediaSeek,
+        drawMediaControls: drawMediaControls
     };
 
     function broken(value) {
