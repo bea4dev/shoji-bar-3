@@ -8,6 +8,12 @@ import "components"
 import "theme.js" as Theme
 
 ShellRoot {
+    // The lock is its own surface, its own keyboard and its own clock, and it
+    // is reached from a keybinding rather than from anything on screen. It is
+    // named here because a singleton nothing mentions is never created, and
+    // its IPC entry point has to exist before somebody asks for it.
+    property var session: Lock
+
     // The wallpaper, on its own layer under everything. It is a picture, not
     // an island: no glass, no input, no reserved space. It is a second layer
     // only because a background and a bar cannot be the same surface -- the

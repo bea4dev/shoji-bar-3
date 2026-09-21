@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Io
+import ".."
 import "../theme.js" as Theme
 
 // The fourth section: three ways to end the session.
@@ -48,13 +49,19 @@ Item {
     function activate(index) {
         if (index < 0 || index >= actions.length)
             return;
-        if (armed !== index) {
+        var chosen = actions[index];
+        // Only what cannot be undone asks twice.
+        if (chosen.confirm && armed !== index) {
             armed = index;
             return;
         }
         armed = -1;
+        if (chosen.session === "lock") {
+            Lock.engage();
+            return;
+        }
         runner.running = false;
-        runner.command = actions[index].command;
+        runner.command = chosen.command;
         runner.running = true;
     }
 

@@ -133,7 +133,15 @@ var powerTileSize = 72;
 var powerTileRadius = 20;
 var powerIconSize = 28;
 var powerLabelGap = 18;
-var powerColumns = [0.2, 0.5, 0.8];
+// Derived from how many tiles there are, so adding one re-spaces the row
+// instead of needing three numbers rewritten.
+function spreadColumns(count, width, padX) {
+    var out = [];
+    var inner = width - padX * 2;
+    for (var i = 0; i < count; i++)
+        out.push((padX + inner * (i + 0.5) / count) / width);
+    return out;
+}
 // Longest caption, including the one an armed tile shows.
 var powerLabelChars = 11;
 
@@ -142,12 +150,20 @@ var powerHeight = powerLabelY + 14 + powerPadBottom;
 
 // What each tile does. Written here so the commands are one line to change,
 // and so nothing in the QML has to know how a session ends on this machine.
+// `confirm` is what needs a second press. Locking is not something to regret,
+// so it goes first and answers the first press; the three that end a session
+// do not.
 var powerActions = [
-    { label: "POWER OFF", icon: "power", command: ["systemctl", "poweroff"] },
-    { label: "RESTART", icon: "restart", command: ["systemctl", "reboot"] },
-    { label: "LOG OUT", icon: "logout",
+    { label: "LOCK", icon: "lock", session: "lock", confirm: false },
+    { label: "POWER OFF", icon: "power", confirm: true,
+      command: ["systemctl", "poweroff"] },
+    { label: "RESTART", icon: "restart", confirm: true,
+      command: ["systemctl", "reboot"] },
+    { label: "LOG OUT", icon: "logout", confirm: true,
       command: ["sh", "-c", "loginctl terminate-session \"${XDG_SESSION_ID:-self}\""] }
 ];
+
+var powerColumns = spreadColumns(powerActions.length, powerWidth, powerPadX);
 
 // Ending a session is not something to do on a slipped click: the first press
 // arms a tile and the second one carries it out. This is what an armed tile
@@ -438,6 +454,42 @@ var settingsScrollDownY = settingsListY + settingsListHeight - 13;
 // its own besides the power selector.
 var settingsNotifyPage = 3;
 var settingsWallPage = 4;
+
+// ---------------------------------------------------------------------------
+// Lock screen
+// ---------------------------------------------------------------------------
+//
+// One island, centred, on the wallpaper it was locked over. It is a session
+// lock surface rather than a layer, so the compositor's island glass does not
+// reach it: like the tray popup, it carries its own ground.
+var lockWidth = 420;
+var lockRadius = 34;
+var lockPadX = 32;
+var lockPadTop = 28;
+var lockPadBottom = 26;
+
+var lockClockSize = 58;
+var lockClockY = lockPadTop + 32;
+var lockDateY = lockClockY + 40;
+var lockAxisY = lockDateY + 20;
+var lockFieldY = lockAxisY + 36;
+var lockRuleY = lockFieldY + 22;
+var lockStatusY = lockRuleY + 20;
+var lockHeight = lockStatusY + 14 + lockPadBottom;
+
+// The secret, plotted: one point per character on the rule below it.
+var lockDotSize = 7;
+var lockDotGap = 11;
+// Past this the row stops growing rather than running off the island. A
+// shoulder surfer learns nothing from a number they can already count.
+var lockDotsMax = 20;
+
+var lockUserChars = 16;
+var lockStatusChars = 26;
+
+// What the lock lays over the wallpaper, and what the island is made of.
+var lockScrim = withAlpha("05080d", 0.55);
+var lockTint = withAlpha("101825", 0.62);
 
 // ---------------------------------------------------------------------------
 // Wallpaper
@@ -1097,6 +1149,36 @@ function powerPhase(t, stage, index) {
     return remap(t * powerScheduleMs, at, at + stage.ms);
 }
 
+// ----- the lock screen's pen schedule ---------------------------------------
+
+var lockLeadInMs = panelLeadInMs;
+
+var drawLockClock = { at: spread(0), ms: typeMs(5) };
+var drawLockDate = { at: spread(120), ms: typeMs(dateChars) };
+var drawLockAxis = { at: spread(240), ms: 560 };
+var drawLockField = { at: spread(420), ms: 420 };
+var drawLockRule = { at: spread(520), ms: 440 };
+var drawLockUser = { at: spread(620), ms: typeMs(lockUserChars) };
+
+// How long the cover takes to arrive, and how it leaves. The release is slower
+// than the panels' undraw: a lock is let go of, not snapped shut.
+var lockCoverMs = shapeMs(260);
+var lockReleaseMs = shapeMs(360);
+// How long the cover waits before following the retracting strokes off.
+var lockReleaseHoldMs = shapeMs(120);
+
+var lockScheduleMs = lockLeadInMs + Math.max(
+    drawLockClock.at + drawLockClock.ms, drawLockDate.at + drawLockDate.ms,
+    drawLockAxis.at + drawLockAxis.ms, drawLockField.at + drawLockField.ms,
+    drawLockRule.at + drawLockRule.ms, drawLockUser.at + drawLockUser.ms);
+
+var durLockDraw = Math.round(lockScheduleMs * drawTempo);
+
+function lockPhase(t, stage) {
+    var at = lockLeadInMs + stage.at;
+    return remap(t * lockScheduleMs, at, at + stage.ms);
+}
+
 // Progress of one clock stage, given that panel's 0..1 driver.
 function clockPhase(t, stage, index) {
     var at = clockStageStart(stage, index);
@@ -1451,6 +1533,12 @@ function roundedRectPath(w, h, r, progress) {
         lowerIslandHeight: lowerIslandHeight,
         clockHeight: clockHeight,
         powerHeight: powerHeight,
+        lockHeight: lockHeight,
+        lockScheduleMs: lockScheduleMs,
+        durLockDraw: durLockDraw,
+        lockCoverMs: lockCoverMs,
+        lockReleaseMs: lockReleaseMs,
+        lockReleaseHoldMs: lockReleaseHoldMs,
         settingsHeight: settingsHeight,
         mediaHeight: mediaHeight,
         dockPairHeight: dockPairHeight,
@@ -1524,6 +1612,12 @@ function roundedRectPath(w, h, r, progress) {
         drawPowerFrame: drawPowerFrame,
         drawPowerGlyph: drawPowerGlyph,
         drawPowerLabel: drawPowerLabel,
+        drawLockClock: drawLockClock,
+        drawLockDate: drawLockDate,
+        drawLockAxis: drawLockAxis,
+        drawLockField: drawLockField,
+        drawLockRule: drawLockRule,
+        drawLockUser: drawLockUser,
         drawSettingsIcon: drawSettingsIcon,
         drawSettingsLabel: drawSettingsLabel,
         drawSettingsRule: drawSettingsRule,
