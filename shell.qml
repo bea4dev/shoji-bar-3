@@ -61,7 +61,9 @@ ShellRoot {
             // much taller than this; the opened menu is meant to overlap
             // windows rather than push them down.
             exclusionMode: ExclusionMode.Normal
-            exclusiveZone: Theme.screenPad * 2 + Theme.barHeight
+            // Derived in theme.js from the pill and one knob, so the figure
+            // the compositor is told is the same one the pill is drawn from.
+            exclusiveZone: Theme.exclusiveZone
 
             WlrLayershell.layer: WlrLayer.Top
             // ShojiWM matches this namespace to route the layer through
@@ -242,6 +244,8 @@ ShellRoot {
                         bar.openLauncher();
                     else if (action === "close")
                         bar.closeLauncher();
+                    else if (action === "clipboard")
+                        bar.toggleClipboard();
                     else
                         bar.toggleLauncher();
                 }

@@ -8,6 +8,7 @@ import Quickshell.Io
 //
 //   quickshell -p ~/.config/shoji-bar-3 ipc call launcher toggle
 //   quickshell -p ~/.config/shoji-bar-3 ipc call launcher toggleOn eDP-1
+//   quickshell -p ~/.config/shoji-bar-3 ipc call launcher clipboardOn eDP-1
 //
 // `quickshell -p ~/.config/shoji-bar-3 ipc show` lists these.
 //
@@ -31,10 +32,15 @@ Singleton {
         function close(): void { root.requested("close", ""); }
         function toggle(): void { root.requested("toggle", ""); }
 
+        // The same panel with its field pointed at the clipboard's history
+        // rather than at the applications.
+        function clipboard(): void { root.requested("clipboard", ""); }
+
         // The screen-addressed forms. A keybinding should use these with the
         // monitor under the pointer, so the panel opens where the eye is.
         function openOn(screen: string): void { root.requested("open", screen); }
         function closeOn(screen: string): void { root.requested("close", screen); }
         function toggleOn(screen: string): void { root.requested("toggle", screen); }
+        function clipboardOn(screen: string): void { root.requested("clipboard", screen); }
     }
 }

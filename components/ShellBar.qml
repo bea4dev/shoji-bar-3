@@ -65,12 +65,16 @@ Item {
     property int section: -1
     property real launcher: 0
     property real launcherDraw: 0
+    // The launcher's list has a driver of its own, because it is redrawn when
+    // the corpus under it changes and the frame around it is not.
+    property real launcherList: 0
     property real clock: 0
     property real clockDraw: 0
     property real settings: 0
     property real settingsDraw: 0
     // The dock is a pair: itself and the media island under it. They arrive
     // and leave as one thing, a beat apart.
+    property real dockDraw: 0
     property real power: 0
     property real powerDraw: 0
     property real media: 0
@@ -193,6 +197,14 @@ Item {
                 easing.type: Easing.BezierSpline
                 easing.bezierCurve: Theme.dockCurve
             }
+            // The dock's contents start with the dock, on the dock's own
+            // driver -- not on the menu's, which is already finished whenever
+            // the dock is swapped back in.
+            NumberAnimation {
+                target: bar; property: "dockDraw"; to: 1
+                duration: Theme.durDockDraw
+                easing.type: Easing.Linear
+            }
             // The second box of the same thing: extruded out of the first one
             // rather than announced separately.
             SequentialAnimation {
@@ -222,6 +234,11 @@ Item {
             duration: Theme.socketRetractMs
             easing.type: Easing.BezierSpline
             easing.bezierCurve: Theme.dockCurve
+        }
+        NumberAnimation {
+            target: bar; property: "dockDraw"; to: 0
+            duration: Theme.durDockUndraw
+            easing.type: Easing.Linear
         }
         NumberAnimation {
             target: bar; property: "media"; to: 0
@@ -268,6 +285,31 @@ Item {
             duration: Theme.durLauncherUndraw
             easing.type: Easing.Linear
         }
+        NumberAnimation {
+            target: bar; property: "launcherList"; to: 0
+            duration: Theme.durLauncherListUndraw
+            easing.type: Easing.Linear
+        }
+    }
+
+    // Redrawn on its own: once when the panel arrives, and again whenever the
+    // field is pointed at a different corpus. Its delay is written rather than
+    // bound, for the reason given above.
+    SequentialAnimation {
+        id: launcherListIn
+        PauseAnimation { id: launcherListDelay }
+        NumberAnimation {
+            target: bar; property: "launcherList"; to: 1
+            duration: Theme.durLauncherListDraw
+            easing.type: Easing.Linear
+        }
+    }
+
+    function drawLauncherList(delayMs) {
+        launcherListIn.stop();
+        launcherList = 0;
+        launcherListDelay.duration = delayMs;
+        launcherListIn.restart();
     }
 
     SequentialAnimation {
@@ -462,7 +504,7 @@ Item {
 
     function stopSocket() {
         dockIn.stop(); dockOut.stop();
-        launcherIn.stop(); launcherOut.stop();
+        launcherIn.stop(); launcherOut.stop(); launcherListIn.stop();
         clockIn.stop(); clockOut.stop();
         settingsIn.stop(); settingsOut.stop(); settingsPaneIn.stop();
         powerIn.stop(); powerOut.stop();
@@ -483,9 +525,11 @@ Item {
     function fillSocket(which, delayMs) {
         islandInDelay(which).duration = delayMs;
         islandIn(which).restart();
-        // The pane trails the rule it hangs from, measured from the same
+        // A list trails the rule it hangs from, measured from the same
         // instant the island starts moving.
-        if (which === 2)
+        if (which === 0)
+            drawLauncherList(delayMs + Theme.launcherListLeadMs);
+        else if (which === 2)
             drawSettingsPane(delayMs + Theme.settingsPaneLeadMs);
     }
 
@@ -585,19 +629,27 @@ Item {
         setSection(section === index ? -1 : index);
     }
 
+    // A panel is shown as it was designed to be shown, not as the last reader
+    // left it: a query still in the field, a calendar still on another month,
+    // a tile still armed. Every way in goes through here, so a panel opened by
+    // a keybinding starts from the same place as one opened by its tile.
+    function prepareSection(which) {
+        if (which === 0)
+            launcherIsland.reset();
+        else if (which === 1)
+            clockIsland.reset();
+        else if (which === 2)
+            settingsIsland.reset();
+        else if (which === 3)
+            powerIsland.reset();
+    }
+
     function setSection(next) {
         if (section === next)
             return;
         hit.wheelCarry = 0;
         section = next;
-        if (next === 0)
-            launcherIsland.reset();
-        else if (next === 1)
-            clockIsland.reset();
-        else if (next === 2)
-            settingsIsland.reset();
-        else if (next === 3)
-            powerIsland.reset();
+        prepareSection(next);
         swapSocket(next, Theme.socketAdmitMs);
     }
 
@@ -614,6 +666,7 @@ Item {
             return;
         }
         section = 0;
+        prepareSection(0);
         mode = 2;
     }
 
@@ -627,6 +680,18 @@ Item {
             mode = 0;
         else
             openLauncher();
+    }
+
+    // The same panel with its field pointed at the clipboard. Opening it this
+    // way is one gesture, so it does not go through the applications list on
+    // the way.
+    function toggleClipboard() {
+        if (launcherOpen && launcherIsland.clipping) {
+            mode = 0;
+            return;
+        }
+        openLauncher();
+        launcherIsland.mode = Theme.launcherClipMode;
     }
 
     // ----- derived silhouette ----------------------------------------------
@@ -833,7 +898,7 @@ Item {
     readonly property bool menuInteractive: Theme.phase(
         menuDraw, Theme.drawFrame, Theme.columns.length - 1) > 0.5
     readonly property bool dockInteractive:
-        Theme.phase(menuDraw, Theme.drawTrayIcons) > 0.5
+        Theme.dockPhase(dockDraw, Theme.drawTrayIcons) > 0.5
     readonly property bool launcherInteractive: launcherVisible
         && Theme.launcherPhase(launcherDraw, Theme.drawLauncherRow, 0) > 0.5
     readonly property bool clockInteractive: clockVisible
@@ -1054,6 +1119,15 @@ Item {
     }
 
     // Result rows, hit-tested from the same MouseArea in the same coordinates.
+    // The chip that says which corpus the field is searching.
+    function launcherModeAt(px, py) {
+        if (!launcherVisible
+            || Theme.launcherPhase(launcherDraw, Theme.drawLauncherMode) <= 0.5)
+            return -1;
+        return launcherIsland.modeAt(px - (launcherContentX - blobX),
+                                     py - (launcherContentY - blobY));
+    }
+
     function launcherRowAt(px, py) {
         if (!launcherInteractive)
             return -1;
@@ -1105,6 +1179,8 @@ Item {
         readonly property int hoverColumn: containsMouse ? bar.columnAt(mouseX, mouseY) : -1
         readonly property int hoverTray: containsMouse ? bar.trayAt(mouseX, mouseY) : -1
         readonly property int hoverRow: containsMouse ? bar.launcherRowAt(mouseX, mouseY) : -1
+        readonly property bool hoverLauncherMode: containsMouse
+            && bar.launcherModeAt(mouseX, mouseY) >= 0
         readonly property int hoverControl: containsMouse ? bar.clockControlAt(mouseX, mouseY) : -1
         readonly property int hoverTab: containsMouse ? bar.settingsTabAt(mouseX, mouseY) : -1
         readonly property int hoverSetting: containsMouse ? bar.settingsControlAt(mouseX, mouseY) : -1
@@ -1132,6 +1208,7 @@ Item {
         // now that the rest of it swallows clicks.
         cursorShape: hoverColumn >= 0 || hoverTray >= 0 || hoverRow >= 0
             || hoverControl >= 0 || hoverTab >= 0 || hoverSetting >= 0
+            || hoverLauncherMode
             || hoverSettingRow >= 0 || hoverSettingScroll >= 0
             || hoverMediaIcon >= 0 || hoverMediaDevice >= 0
             || hoverMediaControl >= 0 || hoverMediaSlider >= 0 || hoverMediaSeek
@@ -1285,9 +1362,13 @@ Item {
             if (event.button !== Qt.LeftButton)
                 return;
             bar.closeTrayMenu();
+            if (bar.launcherModeAt(event.x, event.y) >= 0) {
+                launcherIsland.toggleMode();
+                return;
+            }
             var row = bar.launcherRowAt(event.x, event.y);
             if (row >= 0) {
-                launcherIsland.activate(row);
+                launcherIsland.activate(row, event.button === Qt.RightButton);
                 return;
             }
             var control = bar.clockControlAt(event.x, event.y);
@@ -1559,12 +1640,12 @@ Item {
         trayItems: bar.trayItems
         trayHovered: hit.hoverTray
 
-        batteryIconReveal: Theme.pen(Theme.phase(bar.menuDraw, Theme.drawBatteryIcon))
-        batteryValueReveal: Theme.phase(bar.menuDraw, Theme.drawBatteryValue)
-        batteryStatusReveal: Theme.phase(bar.menuDraw, Theme.drawBatteryStatus)
-        batteryGaugeDraw: Theme.pen(Theme.phase(bar.menuDraw, Theme.drawBatteryGauge))
-        trayFrameDraw: Theme.pen(Theme.phase(bar.menuDraw, Theme.drawTrayFrame))
-        trayIconsReveal: Theme.pen(Theme.phase(bar.menuDraw, Theme.drawTrayIcons))
+        batteryIconReveal: Theme.pen(Theme.dockPhase(bar.dockDraw, Theme.drawBatteryIcon))
+        batteryValueReveal: Theme.dockPhase(bar.dockDraw, Theme.drawBatteryValue)
+        batteryStatusReveal: Theme.dockPhase(bar.dockDraw, Theme.drawBatteryStatus)
+        batteryGaugeDraw: Theme.pen(Theme.dockPhase(bar.dockDraw, Theme.drawBatteryGauge))
+        trayFrameDraw: Theme.pen(Theme.dockPhase(bar.dockDraw, Theme.drawTrayFrame))
+        trayIconsReveal: Theme.pen(Theme.dockPhase(bar.dockDraw, Theme.drawTrayIcons))
     }
 
     LauncherIsland {
@@ -1573,10 +1654,23 @@ Item {
         y: bar.launcherY
         width: bar.launcherW
         height: bar.launcherH
-        visible: bar.launcherVisible
+        // Visible from the moment the panel is asked for, not from the moment
+        // its box starts growing. An item that is not visible cannot hold
+        // active focus, and the box does not start growing until the menu is
+        // most of the way open -- 186ms measured -- so a keybinding that opens
+        // the launcher and a reader who starts typing immediately were racing,
+        // and the first character went to whatever had the keyboard before.
+        // It is still 0x0 and clipped until then, so nothing is drawn early.
+        visible: bar.launcherVisible || bar.launcherOpen
 
         draw: bar.launcherDraw
+        listDraw: bar.launcherList
         hovered: hit.hoverRow
+        hoveredMode: hit.hoverLauncherMode
+
+        // Pointing the field at another corpus redraws the list and nothing
+        // else. No delay: the rail it hangs from is already there.
+        onModeChanged: bar.drawLauncherList(0)
         // Holding the keyboard is a state of the panel, not of the window: the
         // layer asks for on-demand focus from the same flag.
         active: bar.launcherOpen

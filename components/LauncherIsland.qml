@@ -1,7 +1,9 @@
 import QtQuick
+import QtQuick.Shapes
 import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Widgets
+import ".."
 import "../theme.js" as Theme
 
 // The launcher: the first section panel, extruded out of the menu in the
@@ -21,10 +23,16 @@ import "../theme.js" as Theme
 Item {
     id: launcher
 
-    // 0..1 pen driver for this panel.
+    // 0..1 pen driver for the panel's frame.
     property real draw: 1
+    // 0..1 pen driver for the list under it, redrawn whenever the corpus
+    // changes: switching what the field searches must not redraw the switch.
+    property real listDraw: 1
+    // Which corpus the field is searching.
+    property int mode: Theme.launcherAppMode
     // Row slot under the pointer, hit-tested by the bar's single MouseArea.
     property int hovered: -1
+    property bool hoveredMode: false
     // Whether the panel should be holding the keyboard.
     property bool active: false
 
@@ -39,12 +47,40 @@ Item {
     // First visible result: the window slides to keep `selected` inside it.
     property int first: 0
 
-    readonly property int total: apps.length
+    readonly property bool clipping: mode === Theme.launcherClipMode
+    readonly property int total: clipping ? Clipboard.count : apps.length
+
+    // One shape for both corpora, so the rows below know nothing about which
+    // is showing: what it is called, one word about it, a picture if it has
+    // one, and the thing itself.
+    readonly property var results: clipping ? clipResults() : appResults()
+
+    function clipResults() {
+        var q = query.trim().toLowerCase();
+        var kept = [];
+        var history = Clipboard.entries;
+        for (var i = 0; i < history.length; i++) {
+            var item = history[i];
+            // Newest first, as cliphist lists them: the history has an order
+            // of its own and ranking it by the query would destroy it.
+            if (q.length > 0 && item.primary.toLowerCase().indexOf(q) < 0)
+                continue;
+            kept.push({
+                primary: item.primary,
+                note: item.note,
+                icon: "",
+                image: item.image,
+                id: item.id,
+                target: item
+            });
+        }
+        return kept;
+    }
 
     // Ranked rather than merely filtered: a prefix of the name is what the
     // query usually means, a word inside it is the next best thing, and the
     // metadata fields are a fallback that should never outrank either.
-    readonly property var results: {
+    function appResults() {
         var q = query.trim().toLowerCase();
         var scored = [];
         for (var i = 0; i < apps.length; i++) {
@@ -74,8 +110,15 @@ Item {
             return a.rank - b.rank || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
         });
         var out = [];
-        for (var j = 0; j < scored.length; j++)
-            out.push(scored[j].entry);
+        for (var j = 0; j < scored.length; j++) {
+            var found = scored[j].entry;
+            out.push({
+                primary: found.name || "",
+                note: (found.genericName || kindOf(found) || "").toUpperCase(),
+                icon: found.icon || "",
+                target: found
+            });
+        }
         return out;
     }
 
@@ -84,9 +127,37 @@ Item {
         Math.max(0, results.length - Theme.launcherRows)
 
     function reset() {
+        mode = Theme.launcherAppMode;
         input.text = "";
         selected = 0;
         first = 0;
+    }
+
+    // Switching corpus starts again: a query written for one of them means
+    // nothing in the other, and the history has to be read fresh because it
+    // changes behind the bar's back.
+    onModeChanged: {
+        input.text = "";
+        selected = 0;
+        first = 0;
+        // `mode` is compared directly rather than through `clipping`: a
+        // binding on the property that just changed may not have been
+        // re-evaluated yet when its own handler runs.
+        if (mode === Theme.launcherClipMode)
+            Clipboard.refresh();
+    }
+
+    // The chip at the left of the query row, which is also the switch.
+    function modeAt(lx, ly) {
+        if (Math.abs(ly - Theme.launcherQueryY) > 13)
+            return -1;
+        return lx >= Theme.launcherModeX - 6
+            && lx <= Theme.launcherModeX + Theme.launcherModeWidth + 6
+            ? mode : -1;
+    }
+
+    function toggleMode() {
+        mode = clipping ? Theme.launcherAppMode : Theme.launcherClipMode;
     }
 
     // Keeps the visible window around the selection, moving by the least it can.
@@ -140,19 +211,29 @@ Item {
         return "";
     }
 
-    function activate(slot) {
-        var entry = results[first + slot];
-        if (!entry)
-            return;
-        entry.execute();
-        launched();
+    // Primary acts, secondary forgets -- the same division the settings
+    // panel's rows use. Only the history has anything to forget.
+    function activate(slot, secondary) {
+        run(results[first + slot], secondary);
     }
 
     function activateSelected() {
-        var entry = results[selected];
-        if (!entry)
+        run(results[selected], false);
+    }
+
+    function run(row, secondary) {
+        if (!row)
             return;
-        entry.execute();
+        if (!clipping) {
+            row.target.execute();
+            launched();
+            return;
+        }
+        if (secondary) {
+            Clipboard.remove(row.target);
+            return;
+        }
+        Clipboard.copy(row.target);
         launched();
     }
 
@@ -195,6 +276,56 @@ Item {
         height: Theme.launcherHeight
 
         // ----- query row ----------------------------------------------------
+
+        // Which corpus the field is searching, and the switch between them.
+        // Framed the way a tile is framed, at the size of a word.
+        Item {
+            id: chip
+
+            readonly property bool lit: launcher.hoveredMode
+            readonly property real drawn: Theme.pen(
+                Theme.launcherPhase(launcher.draw, Theme.drawLauncherMode))
+
+            x: Theme.launcherModeX
+            y: Theme.launcherQueryY - height / 2
+            width: Theme.launcherModeWidth
+            height: 18
+            visible: drawn > 0.001
+
+            Shape {
+                anchors.fill: parent
+                preferredRendererType: Shape.CurveRenderer
+                opacity: chip.lit ? Theme.opStrong : Theme.opNormal
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                }
+
+                ShapePath {
+                    strokeColor: chip.lit ? Theme.lineStrong : Theme.lineNormal
+                    strokeWidth: Theme.strokeWeight
+                    fillColor: "transparent"
+                    capStyle: ShapePath.RoundCap
+                    joinStyle: ShapePath.RoundJoin
+                    PathSvg {
+                        path: Theme.roundedRectPath(chip.width, chip.height,
+                                                    6, chip.drawn)
+                    }
+                }
+            }
+
+            TypedText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: (chip.height - height) / 2
+                content: Theme.launcherModes[launcher.mode]
+                capacity: Theme.launcherModeChars
+                reveal: Theme.launcherPhase(launcher.draw, Theme.drawLauncherMode)
+                ink: chip.lit ? Theme.textPrimary : Theme.textMuted
+                pixelSize: 8
+                letterSpacing: 1.5
+                opacity: chip.lit ? Theme.opStrong : Theme.opNormal
+            }
+        }
 
         // The prompt is the peek chevron turned to point at the field, so the
         // bar says "here" with one stroke in both places.
@@ -304,7 +435,7 @@ Item {
             y: Theme.launcherQueryY - height / 2
             content: launcher.results.length + " / " + launcher.total
             capacity: Theme.launcherCountChars
-            reveal: Theme.launcherPhase(launcher.draw, Theme.drawLauncherCount)
+            reveal: Theme.launcherListPhase(launcher.listDraw, Theme.drawLauncherCount)
             ink: Theme.textMuted
             pixelSize: 9
             letterSpacing: 2
@@ -348,15 +479,34 @@ Item {
 
                 required property int index
                 readonly property var entry: launcher.results[launcher.first + index] || null
-                readonly property real branch: Theme.pen(
-                    Theme.launcherPhase(launcher.draw, Theme.drawLauncherRow, index))
-                readonly property real nameReveal:
-                    Theme.launcherPhase(launcher.draw, Theme.drawLauncherName, index)
-                readonly property real iconReveal: Theme.pen(
-                    Theme.launcherPhase(launcher.draw, Theme.drawLauncherIcon, index))
+                readonly property real branch: Theme.pen(Theme.launcherListPhase(
+                    launcher.listDraw, Theme.drawLauncherRow, index))
+                readonly property real nameReveal: Theme.launcherListPhase(
+                    launcher.listDraw, Theme.drawLauncherName, index)
+                readonly property real iconReveal: Theme.pen(Theme.launcherListPhase(
+                    launcher.listDraw, Theme.drawLauncherIcon, index))
                 readonly property bool current: launcher.first + index === launcher.selected
                 readonly property bool hovered: launcher.hovered === index
                 readonly property bool lit: current || hovered
+                // A copied picture is shown as itself. The file is written on
+                // demand, so this is empty until it exists.
+                readonly property bool pictorial: launcher.clipping
+                    && entry !== null && entry.image === true
+                readonly property string thumb: pictorial
+                    ? (Clipboard.thumbs[entry.id] || "") : ""
+
+                // Asked for as the row comes into view rather than for the
+                // whole history: six pictures on screen, not a hundred and
+                // thirty-eight on disk.
+                //
+                // The condition is spelled out rather than read from
+                // `pictorial`: a binding on the property that just changed
+                // may not have been re-evaluated yet when its own handler
+                // runs, and this one is downstream of `entry`.
+                onEntryChanged: {
+                    if (launcher.clipping && entry !== null && entry.image === true)
+                        Clipboard.want(entry.target);
+                }
 
                 x: 0
                 y: Theme.launcherRowsY + index * Theme.launcherRowHeight
@@ -406,8 +556,8 @@ Item {
                         return (n < 10 ? "0" : "") + n;
                     }
                     capacity: Theme.launcherIndexChars
-                    reveal: Theme.launcherPhase(
-                        launcher.draw, Theme.drawLauncherRow, row.index)
+                    reveal: Theme.launcherListPhase(
+                        launcher.listDraw, Theme.drawLauncherRow, row.index)
                     ink: Theme.textMuted
                     pixelSize: 9
                     letterSpacing: 2
@@ -424,10 +574,12 @@ Item {
                     y: (row.height - Theme.launcherIconSize) / 2
                     width: Theme.launcherIconSize
                     height: Theme.launcherIconSize
-                    source: row.entry && row.entry.icon
+                    source: row.entry && row.entry.icon !== ""
                         ? Quickshell.iconPath(row.entry.icon, "application-x-executable")
                         : Quickshell.iconPath("application-x-executable", true)
-                    visible: Theme.launcherDesaturate <= 0.001
+                    // A clipboard entry has no icon of its own, and standing
+                    // in a generic one for every row would be noise.
+                    visible: !launcher.clipping && Theme.launcherDesaturate <= 0.001
                     opacity: row.iconReveal * (row.lit ? 1 : 0.82)
                 }
 
@@ -435,23 +587,56 @@ Item {
                     anchors.fill: appIcon
                     source: appIcon
                     desaturation: Theme.launcherDesaturate
-                    visible: Theme.launcherDesaturate > 0.001
+                    visible: !launcher.clipping && Theme.launcherDesaturate > 0.001
                     opacity: row.iconReveal * (row.lit ? 1 : 0.82)
+                }
+
+                // The picture itself, framed the way every other picture in
+                // the bar is framed.
+                ClippingRectangle {
+                    x: Theme.launcherThumbX
+                    y: (row.height - height) / 2
+                    width: Theme.launcherThumbWidth
+                    height: Theme.launcherThumbHeight
+                    radius: Theme.launcherThumbRadius
+                    color: "transparent"
+                    antialiasing: true
+                    border.width: Theme.strokeWeight
+                    border.color: row.lit ? Theme.lineStrong : Theme.lineNormal
+                    opacity: row.iconReveal * (row.lit ? 1 : 0.85)
+                    visible: row.pictorial && opacity > 0.001
+
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        source: row.thumb
+                        fillMode: Image.PreserveAspectCrop
+                        sourceSize.width: Theme.launcherThumbWidth * 3
+                        sourceSize.height: Theme.launcherThumbHeight * 3
+                        smooth: true
+                        asynchronous: true
+                        visible: row.thumb !== ""
+                    }
                 }
 
                 // Clipped rather than elided: the name is written a character
                 // at a time, and an elide would rewrite its tail every frame.
                 Item {
-                    x: Theme.launcherNameX
+                    // The text starts where the icon would have been when
+                    // there is no icon to start after, and after the picture
+                    // when there is one. Keyed to whether the entry is a
+                    // picture rather than to whether its file has arrived, so
+                    // the line does not jump when the thumbnail lands.
+                    x: row.pictorial ? Theme.launcherThumbTextX
+                        : launcher.clipping ? Theme.launcherIconX : Theme.launcherNameX
                     y: 0
-                    width: body.width - Theme.launcherPadX - Theme.launcherNoteWidth
-                        - Theme.launcherNameX
+                    width: body.width - Theme.launcherPadX - Theme.launcherNoteWidth - x
                     height: row.height
                     clip: true
 
                     TypedText {
                         y: (row.height - height) / 2
-                        content: row.entry ? row.entry.name || "" : ""
+                        content: row.entry ? row.entry.primary : ""
                         capacity: Theme.launcherNameChars
                         reveal: row.nameReveal
                         ink: row.lit ? Theme.textPrimary : Theme.textMuted
@@ -471,15 +656,10 @@ Item {
                     width: Theme.launcherNoteWidth - 10
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
-                    // What kind of thing this is, not what it is called
-                    // twice: the desktop id would only repeat the name in
-                    // uppercase with a vendor prefix stuck to it. Vendor
-                    // categories are skipped for the same reason -- X-XFCE
-                    // says who shipped the file, not what it launches.
-                    text: row.entry
-                        ? (row.entry.genericName
-                           || launcher.kindOf(row.entry) || "").toUpperCase()
-                        : ""
+                    // For an application, what kind of thing it is rather
+                    // than what it is called twice. For a clipboard entry,
+                    // how big the thing behind the preview is.
+                    text: row.entry ? row.entry.note : ""
                     color: Theme.textMuted
                     font.family: Theme.fontMono
                     font.weight: Font.Light

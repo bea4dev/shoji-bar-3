@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 // Gap between the screen's top edge and the silhouette.
-var screenPad = 10;
+var screenPad = 6;
 // Slack kept around the silhouette inside the surface: antialiasing plus the
 // outward bulge of the smooth-minimum blend when shapes merge.
 var surfacePad = 40;
@@ -21,6 +21,21 @@ var surfacePad = 40;
 var barWidth = 152;
 var barHeight = 34;
 var barRadius = 17;
+
+// How much of the screen the bar reserves for itself through the layer shell,
+// measured down from the top edge. Only the resting pill and its padding: the
+// menu and everything it opens are meant to overlap windows rather than push
+// them down, so none of that is counted here.
+//
+// `exclusiveZonePad` is the knob. Positive keeps windows further away than the
+// pill needs, negative lets them come closer -- far enough negative and they
+// pass under it. Zero is the pill plus its own padding, top and bottom.
+//
+// Declared here rather than beside `screenPad`, because it reads `barHeight`:
+// this file is a `.pragma library`, where anything written above its own
+// inputs quietly evaluates to NaN.
+var exclusiveZonePad = -8;
+var exclusiveZone = screenPad * 2 + barHeight + exclusiveZonePad;
 
 var peekWidth = 236;
 var peekHeight = 48;
@@ -223,8 +238,20 @@ var launcherPadTop = 22;
 var launcherPadBottom = 22;
 
 // Query row, in launcher-local coordinates.
-var launcherPromptX = launcherPadX + 2;
-var launcherQueryX = launcherPadX + 24;
+//
+// The chip at the left says which corpus the field is searching and is also
+// the switch between them: applications, or the clipboard's history. One chip
+// rather than a pair of tabs, because there are two of them and a switch that
+// shows its own state costs no width.
+var launcherModes = ["APPS", "CLIP"];
+var launcherAppMode = 0;
+var launcherClipMode = 1;
+var launcherModeChars = 4;
+var launcherModeX = launcherPadX;
+var launcherModeWidth = 34;
+
+var launcherPromptX = launcherModeX + launcherModeWidth + 10;
+var launcherQueryX = launcherPromptX + 14;
 var launcherQueryY = launcherPadTop + 8;
 var launcherQuerySize = 13;
 var launcherAxisY = launcherQueryY + 22;
@@ -238,6 +265,15 @@ var launcherRailX = launcherPadX + 18;
 var launcherBranch = 10;
 var launcherIconX = launcherPadX + 36;
 var launcherIconSize = 20;
+
+// A copied picture, shown as itself. Wider than it is tall, because most of
+// what lands on a clipboard is a screenshot.
+var launcherThumbX = launcherIconX - 2;
+var launcherThumbWidth = 34;
+var launcherThumbHeight = 24;
+var launcherThumbRadius = 5;
+// Where a row's text starts when a picture is standing in front of it.
+var launcherThumbTextX = launcherThumbX + launcherThumbWidth + 10;
 var launcherNameX = launcherPadX + 66;
 // Width reserved at the right for the row's annotation, measured from the
 // island's inner edge.
@@ -534,12 +570,12 @@ var tint = withAlpha("1a2433", surfaceOpacity);
 // Ink: everything is drawn as thin strokes and sparse type.
 // ---------------------------------------------------------------------------
 
-var textPrimary = "#f2f7fc";
-var textMuted = "#a9bccd";
+var textPrimary = "#ffffff";
+var textMuted = "#e9eced";
 
-var lineStrong = "#c8dcee";
-var lineNormal = "#a8c2d8";
-var lineFaint = "#8fa8bd";
+var lineStrong = "#ffffff";
+var lineNormal = "#e8e2e8";
+var lineFaint = "#efe8ed";
 
 var opStrong = 0.92;
 var opNormal = 0.55;
@@ -710,35 +746,11 @@ var drawGlyph = {
 
 // ----- the dock island's contents -------------------------------------------
 //
-// These run alongside the menu's stages rather than after them. The islands are
-// far enough apart to be read at once, and queueing them would double the time
-// the menu takes to finish for no gain. Each island still resolves top to
-// bottom within itself, and the island's contents start with the island.
+// How much the dock's own text stages have to write. The stages themselves are
+// further down, with the other islands': the dock is drawn on its own driver
+// like every one of them.
 var batteryValueChars = 4;
 var batteryStatusChars = 17;
-
-// Where the island starts moving, expressed in schedule milliseconds. Its
-// contents start with it, so the island and the drawing inside it read as one
-// event rather than two. The island runs on the silhouette's clock, which
-// `drawTempo` does not scale, so the crossing is computed rather than written
-// down: a constant would drift the moment either clock was retuned.
-// Negative when the island starts before the pen's lead-in has even elapsed,
-// which the schedule cannot express: nothing on the pen's clock can happen
-// earlier than `drawLeadInMs`. Kept unclamped so the check at the end of the
-// file can say so rather than letting the two quietly drift apart.
-var dockStartsAtRaw = dockStartMs / drawTempo - drawLeadInMs;
-var dockStartsAt = Math.max(0, dockStartsAtRaw);
-
-// Offset from that, if the contents should trail the island after all.
-var dockContentLeadMs = 0;
-var dockContentAt = dockStartsAt + dockContentLeadMs;
-
-var drawBatteryIcon = { at: dockContentAt, ms: 280 };
-var drawBatteryValue = { at: dockContentAt + 80, ms: typeMs(batteryValueChars) };
-var drawBatteryStatus = { at: dockContentAt + 160, ms: typeMs(batteryStatusChars) };
-var drawBatteryGauge = { at: dockContentAt + 300, ms: 560 };
-var drawTrayFrame = { at: dockContentAt + 540, ms: 680 };
-var drawTrayIcons = { at: dockContentAt + 940, ms: 460 };
 
 // The caption is written once the frame that holds it is closed.
 var drawLabel = {
@@ -805,9 +817,7 @@ function stageEnd(stage) {
 var drawScheduleMs = Math.max(
     stageEnd(drawDate), stageEnd(drawAxis), stageEnd(drawDrop),
     stageEnd(drawFrame), stageEnd(drawSweep), stageEnd(drawGlyph),
-    stageEnd(drawLabel), stageEnd(drawBatteryIcon), stageEnd(drawBatteryValue),
-    stageEnd(drawBatteryStatus), stageEnd(drawBatteryGauge),
-    stageEnd(drawTrayFrame), stageEnd(drawTrayIcons));
+    stageEnd(drawLabel));
 
 var durMenuDraw = Math.round(drawScheduleMs * drawTempo);
 var durMenuUndraw = Math.round(durMenuDraw * drawUndrawRatio);
@@ -879,6 +889,42 @@ function spread(at) {
 //
 //   <stage>.stagger   whether the stage repeats per row
 
+// ----- the dock island's pen schedule ---------------------------------------
+//
+// Its own driver, like every other island's.
+//
+// It used to ride the menu's, which was fine while the dock could only arrive
+// when the menu did. The moment a section panel could be swapped back out for
+// it that became wrong: the menu's driver is already at 1 by then, so the
+// dock's contents were simply there, fully drawn, the instant the box arrived.
+// Only a full close and reopen put the menu's driver back to zero, which is
+// exactly the case that still looked right.
+
+var dockLeadInMs = panelLeadInMs;
+
+var drawBatteryIcon = { at: spread(0), ms: 280 };
+var drawBatteryValue = { at: spread(80), ms: typeMs(batteryValueChars) };
+var drawBatteryStatus = { at: spread(160), ms: typeMs(batteryStatusChars) };
+var drawBatteryGauge = { at: spread(300), ms: 560 };
+var drawTrayFrame = { at: spread(540), ms: 680 };
+var drawTrayIcons = { at: spread(940), ms: 460 };
+
+var dockScheduleMs = dockLeadInMs + Math.max(
+    drawBatteryIcon.at + drawBatteryIcon.ms,
+    drawBatteryValue.at + drawBatteryValue.ms,
+    drawBatteryStatus.at + drawBatteryStatus.ms,
+    drawBatteryGauge.at + drawBatteryGauge.ms,
+    drawTrayFrame.at + drawTrayFrame.ms,
+    drawTrayIcons.at + drawTrayIcons.ms);
+
+var durDockDraw = Math.round(dockScheduleMs * drawTempo);
+var durDockUndraw = Math.round(durDockDraw * drawUndrawRatio);
+
+function dockPhase(t, stage) {
+    var at = dockLeadInMs + stage.at;
+    return remap(t * dockScheduleMs, at, at + stage.ms);
+}
+
 var launcherLeadInMs = panelLeadInMs;
 var launcherRowStepMs = panelRowStepMs;
 
@@ -887,12 +933,39 @@ var launcherRowStepMs = panelRowStepMs;
 // two devices move the same list at the same rate.
 var wheelNotch = 120;
 
-var drawLauncherPrompt = { at: spread(0), ms: 220 };
+// Two schedules on two drivers, as the settings panel has. The frame -- the
+// chip, the prompt, the field, the rule and the rail -- is drawn once when the
+// panel arrives. The list is drawn again every time the corpus under it
+// changes, and switching corpus must not redraw the switch that did it.
+
+var drawLauncherMode = { at: spread(0), ms: 220 };
+var drawLauncherPrompt = { at: spread(60), ms: 220 };
 var drawLauncherQuery = { at: spread(100), ms: 200 };
 var drawLauncherAxis = { at: spread(160), ms: 520 };
 var drawLauncherRail = { at: spread(340), ms: 480 };
-var drawLauncherCount = { at: spread(420), ms: typeMs(launcherCountChars) };
-var drawLauncherRow = { at: spread(520), ms: 300, stagger: true };
+
+// When a launcher stage starts, after the panel's lead-in and its row's trail.
+function launcherStageStart(stage, index) {
+    return launcherLeadInMs + stage.at
+        + (stage.stagger ? (index || 0) * launcherRowStepMs : 0);
+}
+
+function launcherStageEnd(stage) {
+    return launcherStageStart(stage, launcherRows - 1) + stage.ms;
+}
+
+var launcherScheduleMs = Math.max(
+    launcherStageEnd(drawLauncherMode), launcherStageEnd(drawLauncherPrompt),
+    launcherStageEnd(drawLauncherQuery), launcherStageEnd(drawLauncherAxis),
+    launcherStageEnd(drawLauncherRail));
+
+var durLauncherDraw = Math.round(launcherScheduleMs * drawTempo);
+var durLauncherUndraw = Math.round(durLauncherDraw * drawUndrawRatio);
+
+// ----- the launcher's list --------------------------------------------------
+
+var drawLauncherCount = { at: spread(0), ms: typeMs(launcherCountChars) };
+var drawLauncherRow = { at: spread(100), ms: 300, stagger: true };
 
 // The icon only fades, and lands as its own row's branch finishes, the way the
 // menu's glyphs land with their frames.
@@ -908,24 +981,28 @@ var drawLauncherName = {
     stagger: true
 };
 
-// When a launcher stage starts, after the panel's lead-in and its row's trail.
-function launcherStageStart(stage, index) {
-    return launcherLeadInMs + stage.at
-        + (stage.stagger ? (index || 0) * launcherRowStepMs : 0);
+function launcherListStageStart(stage, index) {
+    return stage.at + (stage.stagger ? (index || 0) * launcherRowStepMs : 0);
 }
 
-function launcherStageEnd(stage) {
-    return launcherStageStart(stage, launcherRows - 1) + stage.ms;
+var launcherListScheduleMs = Math.max(
+    launcherListStageStart(drawLauncherCount, launcherRows - 1) + drawLauncherCount.ms,
+    launcherListStageStart(drawLauncherRow, launcherRows - 1) + drawLauncherRow.ms,
+    launcherListStageStart(drawLauncherIcon, launcherRows - 1) + drawLauncherIcon.ms,
+    launcherListStageStart(drawLauncherName, launcherRows - 1) + drawLauncherName.ms);
+
+var durLauncherListDraw = Math.round(launcherListScheduleMs * drawTempo);
+var durLauncherListUndraw = Math.round(durLauncherListDraw * drawUndrawRatio);
+
+// How long after the panel starts moving the list begins, so the rail it hangs
+// from is already on its way across. On the pen's clock, converted.
+var launcherListLeadMs = Math.round(
+    (launcherLeadInMs + drawLauncherRail.at) * drawTempo);
+
+function launcherListPhase(t, stage, index) {
+    var at = launcherListStageStart(stage, index);
+    return remap(t * launcherListScheduleMs, at, at + stage.ms);
 }
-
-var launcherScheduleMs = Math.max(
-    launcherStageEnd(drawLauncherPrompt), launcherStageEnd(drawLauncherQuery),
-    launcherStageEnd(drawLauncherAxis), launcherStageEnd(drawLauncherRail),
-    launcherStageEnd(drawLauncherCount), launcherStageEnd(drawLauncherRow),
-    launcherStageEnd(drawLauncherIcon), launcherStageEnd(drawLauncherName));
-
-var durLauncherDraw = Math.round(launcherScheduleMs * drawTempo);
-var durLauncherUndraw = Math.round(durLauncherDraw * drawUndrawRatio);
 
 // Progress of one launcher stage, given that panel's 0..1 driver.
 function launcherPhase(t, stage, index) {
@@ -1346,6 +1423,7 @@ function roundedRectPath(w, h, r, progress) {
 (function checkDerivedValues() {
     var derived = {
         surfaceWidth: surfaceWidth,
+        exclusiveZone: exclusiveZone,
         surfaceHeight: surfaceHeight,
         durPeek: durPeek,
         durMenu: durMenu,
@@ -1353,9 +1431,10 @@ function roundedRectPath(w, h, r, progress) {
         dockRetractMs: dockRetractMs,
         dockStartMs: dockStartMs,
         menuCloseStartMs: menuCloseStartMs,
-        dockStartsAt: dockStartsAt,
 
-        dockContentAt: dockContentAt,
+        dockScheduleMs: dockScheduleMs,
+        durDockDraw: durDockDraw,
+        durDockUndraw: durDockUndraw,
         peekScheduleMs: peekScheduleMs,
         drawScheduleMs: drawScheduleMs,
         durMenuDraw: durMenuDraw,
@@ -1382,6 +1461,10 @@ function roundedRectPath(w, h, r, progress) {
         launcherScheduleMs: launcherScheduleMs,
         durLauncherDraw: durLauncherDraw,
         durLauncherUndraw: durLauncherUndraw,
+        launcherListScheduleMs: launcherListScheduleMs,
+        durLauncherListDraw: durLauncherListDraw,
+        durLauncherListUndraw: durLauncherListUndraw,
+        launcherListLeadMs: launcherListLeadMs,
         launcherGraceMs: launcherGraceMs,
         panelSpread: panelSpread,
         panelLeadInMs: panelLeadInMs,
@@ -1427,6 +1510,7 @@ function roundedRectPath(w, h, r, progress) {
         drawLauncherRow: drawLauncherRow,
         drawLauncherIcon: drawLauncherIcon,
         drawLauncherName: drawLauncherName,
+        drawLauncherMode: drawLauncherMode,
         drawClockNow: drawClockNow,
         drawClockStamp: drawClockStamp,
         drawClockAxis: drawClockAxis,
@@ -1479,15 +1563,6 @@ function roundedRectPath(w, h, r, progress) {
         return false;
     }
 
-    if (dockStartsAtRaw < -1) {
-        console.warn("theme.js: the lower island starts "
-            + Math.round(-dockStartsAtRaw * drawTempo)
-            + "ms before the pen's lead-in elapses, so its contents cannot"
-            + " start with it and will begin at the lead-in instead."
-            + " Lower drawLeadInMs to "
-            + Math.floor(dockStartMs / drawTempo)
-            + " or below to keep them together.");
-    }
 
     var name;
     for (name in derived) {
