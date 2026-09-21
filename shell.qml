@@ -225,6 +225,7 @@ ShellRoot {
             ShellBar {
                 id: bar
                 anchors.fill: parent
+                screen: panel.modelData
 
                 onSectionRequested: (index) => {
                     // Only tiles without a panel of their own reach here. The

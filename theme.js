@@ -38,7 +38,9 @@ var exclusiveZonePad = -8;
 var exclusiveZone = screenPad * 2 + barHeight + exclusiveZonePad;
 
 var peekWidth = 236;
-var peekHeight = 48;
+// Tall enough to hold three lines: the readout, the workspaces the hover is
+// there to show, and the affordance that says the menu is below.
+var peekHeight = 58;
 var peekRadius = 24;
 
 var menuWidth = 424;
@@ -66,7 +68,18 @@ var clockSizeCollapsed = 15;
 var clockSizePeek = 16;
 var clockSizeMenu = 46;
 
-var chevronCenterY = 35;
+var chevronCenterY = 47;
+
+// Workspaces, shown while the pill is hovered and for a moment after they
+// change. Marks on a rule, filled at the one you are on: the same plotted
+// point the power selector and the clock's origin use.
+var peekWorkspaceY = 33;
+var workspaceMark = 7;
+var workspaceGap = 16;
+var workspaceRulePad = 12;
+// How long a change holds the pill open by itself. Long enough to read, short
+// enough that it is not a notification.
+var workspaceFlashMs = 1400;
 var chevronSpan = 13;
 var chevronDrop = 5;
 
@@ -150,17 +163,17 @@ var powerHeight = powerLabelY + 14 + powerPadBottom;
 
 // What each tile does. Written here so the commands are one line to change,
 // and so nothing in the QML has to know how a session ends on this machine.
-// `confirm` is what needs a second press. Locking is not something to regret,
-// so it goes first and answers the first press; the three that end a session
-// do not.
+// `confirm` is what needs a second press: the three that end a session ask
+// twice, and locking -- which is not something to regret -- answers the first
+// press. The row is read left to right, and the order is the one asked for.
 var powerActions = [
-    { label: "LOCK", icon: "lock", session: "lock", confirm: false },
     { label: "POWER OFF", icon: "power", confirm: true,
       command: ["systemctl", "poweroff"] },
     { label: "RESTART", icon: "restart", confirm: true,
       command: ["systemctl", "reboot"] },
     { label: "LOG OUT", icon: "logout", confirm: true,
-      command: ["sh", "-c", "loginctl terminate-session \"${XDG_SESSION_ID:-self}\""] }
+      command: ["sh", "-c", "loginctl terminate-session \"${XDG_SESSION_ID:-self}\""] },
+    { label: "LOCK", icon: "lock", session: "lock", confirm: false }
 ];
 
 var powerColumns = spreadColumns(powerActions.length, powerWidth, powerPadX);
@@ -832,7 +845,13 @@ var drawMinuteMs = 220;
 // menu driver, not this one, because it answers the click rather than the hover.
 var drawChevronClearMs = 260;
 
-var peekScheduleMs = Math.max(drawMinuteMs, drawPeekLeadInMs + drawPeekMs);
+// The strip is drawn as the resting indicator finishes being erased: one
+// reading leaves and the other takes its place.
+var drawWorkspaceAt = drawMinuteMs;
+var drawWorkspaceMs = 260;
+
+var peekScheduleMs = Math.max(drawMinuteMs, drawPeekLeadInMs + drawPeekMs,
+                              drawWorkspaceAt + drawWorkspaceMs);
 
 // Erasing is not drawing played backwards at the same speed. Ink leaves with
 // the mass that carried it, and the mass leaves in `durMenu`, so the return
@@ -1399,6 +1418,12 @@ function peekErasePhase(t) {
     return remap(t * peekScheduleMs, 0, drawMinuteMs);
 }
 
+// The workspace strip, on the same driver again.
+function workspacePhase(t) {
+    return remap(t * peekScheduleMs, drawWorkspaceAt,
+                 drawWorkspaceAt + drawWorkspaceMs);
+}
+
 // Each individual stroke carries its own acceleration, even though the
 // schedule dispatching the strokes runs on linear time: a pen touches down,
 // travels, and lifts. inOutCubic over one short window reads as exactly that.
@@ -1518,6 +1543,7 @@ function roundedRectPath(w, h, r, progress) {
         durDockDraw: durDockDraw,
         durDockUndraw: durDockUndraw,
         peekScheduleMs: peekScheduleMs,
+        workspaceFlashMs: workspaceFlashMs,
         drawScheduleMs: drawScheduleMs,
         durMenuDraw: durMenuDraw,
         durMenuUndraw: durMenuUndraw,

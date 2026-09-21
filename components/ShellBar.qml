@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Services.SystemTray
+import Quickshell.WindowManager
 import ".."
 import "../theme.js" as Theme
 
@@ -26,6 +27,60 @@ Item {
     id: bar
 
     property int mode: 0
+
+    // The screen this bar is on, so the workspaces it shows are that screen's
+    // and not every screen's.
+    property var screen: null
+
+    // ----- workspaces -------------------------------------------------------
+    //
+    // ext-workspace-v1, through Quickshell's window manager. ShojiWM names
+    // them per output ("eDP-1:1"), and the projection is what sorts out which
+    // of them belong to this bar.
+
+    readonly property var projection:
+        screen ? WindowManager.screenProjection(screen) : null
+    readonly property var workspaces: projection ? projection.windowsets : []
+    // Which one is active, and nothing else: a workspace being created or
+    // removed is not somewhere you went.
+    readonly property string workspaceKey: {
+        for (var i = 0; i < workspaces.length; i++) {
+            if (workspaces[i].active)
+                return workspaces[i].id;
+        }
+        return "";
+    }
+
+    property string lastWorkspace: ""
+
+    // A change shows itself: the pill opens as if hovered, holds for a beat,
+    // and closes again unless the pointer arrived in the meantime.
+    onWorkspaceKeyChanged: {
+        var previous = lastWorkspace;
+        lastWorkspace = workspaceKey;
+        // The first list to arrive is not a change. The shell starting is not
+        // something to announce.
+        if (previous !== "" && workspaceKey !== "")
+            flash();
+    }
+
+    Timer {
+        id: flashTimer
+        interval: Theme.workspaceFlashMs
+        onTriggered: {
+            if (bar.mode === 1 && !hit.containsMouse)
+                bar.mode = 0;
+        }
+    }
+
+    function flash() {
+        // The menu is open: everything is already on screen.
+        if (mode >= 2)
+            return;
+        if (mode === 0)
+            mode = 1;
+        flashTimer.restart();
+    }
 
 
 
@@ -1528,6 +1583,19 @@ Item {
                 color: Theme.lineStrong
                 opacity: Theme.opNormal
             }
+        }
+
+        // What the hover is for: where you are, among the workspaces this
+        // screen has. Drawn on the peek's own driver, as the chevron is.
+        WorkspaceStrip {
+            x: 0
+            y: Theme.peekWorkspaceY - height / 2
+            width: content.width
+            workspaces: bar.workspaces
+            draw: Theme.workspacePhase(bar.peekDraw)
+            visible: bar.peek > 0.001 && draw > 0.001
+            // Folded away by the menu, which has its own instruments.
+            opacity: 1 - Theme.clamp01(bar.open * 2)
         }
 
         // Peek affordance: one stroke, under the clock, saying only that there
