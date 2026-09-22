@@ -266,4 +266,74 @@ ShellRoot {
             }
         }
     }
+
+    // The dock, along the bottom edge. A third surface for the same reason the
+    // wallpaper is a second one: a bar at the top and a dock at the bottom
+    // cannot be one rectangle without claiming the whole screen, and a layer
+    // that large would put the glass pipeline over every pixel of it.
+    //
+    // It spans the output's full width, so unlike the bar there is nothing for
+    // the compositor to re-centre and the pill inside can be positioned by the
+    // shell. The height is fixed and holds the pill, the menu standing on it,
+    // and the room the pill needs to start below the screen's edge.
+    Variants {
+        model: Quickshell.screens
+
+        PanelWindow {
+            id: shelfPanel
+            required property var modelData
+            screen: modelData
+
+            color: "transparent"
+
+            anchors.bottom: true
+            anchors.left: true
+            anchors.right: true
+            margins.bottom: 0
+
+            // Reserves nothing: the dock is revealed by the pointer and is
+            // meant to overlap what is under it. Theme.shelfExclusiveZone is
+            // the knob if it should keep windows clear of the edge instead.
+            exclusionMode: ExclusionMode.Normal
+            exclusiveZone: Theme.shelfExclusiveZone
+
+            WlrLayershell.layer: WlrLayer.Top
+            // The same island glass the bar is routed through. See README.
+            WlrLayershell.namespace: "shoji-bar-3"
+            // The dock is a pointer instrument and reads no typing.
+            WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+            implicitHeight: Theme.shelfSurfaceHeight
+
+            // While the dock is away this is a strip a few pixels tall: the
+            // rest of the bottom edge still belongs to the window under it.
+            mask: Region {
+                x: Math.round(dock.hotX)
+                y: Math.round(dock.hotY)
+                width: Math.round(dock.hotW)
+                height: Math.round(dock.hotH)
+
+                Region {
+                    x: Math.round(dock.pillX)
+                    y: Math.round(dock.pillY)
+                    width: Math.round(dock.pillW)
+                    height: Math.round(dock.pillH)
+                    radius: Math.round(dock.pillR)
+                }
+            }
+
+            DockShelf {
+                id: dock
+                anchors.fill: parent
+            }
+
+            // A tile's menu, as a popup rather than another box in the layer.
+            DockMenu {
+                item: dock.menuItem
+                anchorWindow: shelfPanel
+                anchorRect: dock.menuRect
+                onDismissed: dock.closeMenu()
+            }
+        }
+    }
 }

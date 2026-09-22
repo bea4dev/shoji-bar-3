@@ -576,6 +576,118 @@ var toastHoldMs = 5200;
 
 var toastHeight = toastContentY + toastContentHeight + toastPadBottom;
 
+// ---------------------------------------------------------------------------
+// The dock
+// ---------------------------------------------------------------------------
+//
+// The row of applications along the bottom edge. It is a second layer surface
+// for the same reason the wallpaper is: a bar at the top and a dock at the
+// bottom cannot be one rectangle without reserving the whole screen. The bar's
+// one-layer rule is about the bar.
+//
+// Everything here is named `shelf`. `dock` in this file has meant the bar's
+// lower island -- battery and tray -- since before this existed, and two
+// meanings for one prefix in a file of 300 tokens is a bug waiting to happen.
+//
+// Like the bar's, this surface is one fixed size and is never resized: it
+// spans the output's full width, so the compositor has nothing to re-centre
+// and the pill inside it is positioned by us.
+
+// One application: a hairline square holding its own icon.
+var shelfTile = 40;
+var shelfTileRadius = 13;
+var shelfIcon = 24;
+var shelfGap = 11;
+
+var shelfPadX = 14;
+var shelfPadTop = 10;
+var shelfPadBottom = 10;
+var shelfRadius = 22;
+
+// There is no caption. A dock is aimed at rather than read, and a name over
+// the row only ever appeared once the pointer was already on the thing it was
+// naming -- a line of type for something you had found.
+var shelfTileY = shelfPadTop;
+
+// The baseline under the tiles and the marks on it: one mark per window, so
+// the row reads as a plot of what is open rather than as a strip of buttons.
+// A pinned application with nothing open keeps a hollow mark -- a place
+// reserved.
+var shelfMarkY = shelfTileY + shelfTile + 8;
+var shelfMark = 4;
+var shelfMarkGap = 6;
+var shelfMarksMax = 4;
+// How far the baseline runs past the outermost marks.
+var shelfRulePad = 9;
+
+var shelfHeight = shelfMarkY + shelfMark + shelfPadBottom;
+
+// The division between what is pinned and what merely happens to be running:
+// a hairline, and the space it is given in the row.
+var shelfDividerWidth = 17;
+var shelfDividerHeight = 24;
+
+// Nothing pinned and nothing open.
+var shelfEmptyWidth = 164;
+var shelfEmptyChars = 11;
+
+// How far the pill floats above the bottom edge of the screen.
+var shelfLift = 10;
+
+// The strip of screen that reveals it. It is the only part of this surface
+// that takes input while the dock is away, so it is as thin as it can be and
+// still be reachable by a pointer thrown at the edge -- and no wider than the
+// pill plus this margin, so the bottom edge of the screen stays clickable
+// everywhere else.
+var shelfHotHeight = 4;
+var shelfHotPad = 320;
+
+// The dock reserves nothing by default: it is revealed by the pointer and is
+// meant to overlap whatever is underneath. Raise this to keep windows clear of
+// the bottom edge by that many pixels.
+var shelfExclusiveZone = 0;
+
+// Reordering. A pinned tile is dragged to where it should be; a tile that is
+// only running has no stored position to change, so it does not move.
+var shelfDragThreshold = 8;
+
+// Headroom above the pill, so the blend that softens its top edge is not cut
+// off by the edge of the surface.
+var shelfPad = 24;
+
+// The surface. The tile menu is an xdg-popup rather than part of this, so the
+// only thing here is the pill: the pill on its way up is simply below the
+// bottom edge, which costs no height at all.
+var shelfSurfaceHeight = shelfPad + shelfHeight + shelfLift;
+
+// Width of a row of `count` tiles with the divider after `split` of them.
+// `split` at 0 or at `count` means everything is on one side of it, so there
+// is nothing to divide and the divider takes no space.
+function shelfRowWidth(count, split) {
+    if (count <= 0)
+        return shelfEmptyWidth;
+    var w = count * shelfTile + (count - 1) * shelfGap + shelfPadX * 2;
+    if (split > 0 && split < count)
+        w += shelfDividerWidth;
+    return w;
+}
+
+// Left edge of one tile, in the pill's own coordinates. The dock hit-tests
+// with this same function, so what is drawn and what is clickable cannot
+// drift apart.
+function shelfTileX(index, count, split) {
+    var x = shelfPadX + index * (shelfTile + shelfGap);
+    if (split > 0 && split < count && index >= split)
+        x += shelfDividerWidth;
+    return x;
+}
+
+// Centre of the divider: halfway across the widened gap it was given.
+function shelfDividerX(count, split) {
+    return shelfPadX + (split - 1) * (shelfTile + shelfGap) + shelfTile
+        + (shelfGap + shelfDividerWidth) / 2;
+}
+
 // Context menu, drawn in the same vocabulary as the bar. It is a popup, not
 // part of the layer, so the compositor's island glass does not reach it and it
 // has to carry its own ground. Its alpha must also clear ShojiWM's popup-blur
@@ -1355,6 +1467,70 @@ function mediaPhase(t, stage, index) {
     return remap(t * mediaScheduleMs, at, at + stage.ms);
 }
 
+// ----- the dock's pen schedule ----------------------------------------------
+//
+// The dock's row is the one schedule whose length must not depend on what is
+// in it. Everywhere else the number of columns is fixed by the design; here it
+// is however many applications happen to be open, and a per-tile step would
+// make the schedule -- and therefore the driver's duration -- change while the
+// driver is running. The stagger is spread across a fixed span instead: each
+// tile gets its own slot, and twenty tiles take exactly as long as three.
+
+var shelfLeadInMs = 80;
+var shelfSpreadMs = 360;
+
+var drawShelfRule = { at: 0, ms: 520 };
+var drawShelfFrame = { at: 120, ms: 420, stagger: true };
+var drawShelfIcon = { at: 300, ms: 260, stagger: true };
+var drawShelfMark = { at: 420, ms: 220, stagger: true };
+var drawShelfDivider = { at: 300, ms: 260 };
+
+function shelfStageStart(stage, index, count) {
+    var last = Math.max(1, (count || 1) - 1);
+    var slot = Math.min(Math.max(index || 0, 0), last);
+    return shelfLeadInMs + stage.at
+        + (stage.stagger ? shelfSpreadMs * slot / last : 0);
+}
+
+function shelfStageEnd(stage) {
+    return shelfLeadInMs + stage.at + (stage.stagger ? shelfSpreadMs : 0)
+        + stage.ms;
+}
+
+var shelfScheduleMs = Math.max(
+    shelfStageEnd(drawShelfRule),
+    shelfStageEnd(drawShelfFrame),
+    shelfStageEnd(drawShelfIcon),
+    shelfStageEnd(drawShelfMark),
+    shelfStageEnd(drawShelfDivider)
+);
+
+var durShelfDraw = Math.round(shelfScheduleMs * drawTempo);
+var durShelfUndraw = Math.round(durShelfDraw * drawUndrawRatio);
+
+function shelfPhase(t, stage, index, count) {
+    var at = shelfStageStart(stage, index, count);
+    return remap(t * shelfScheduleMs, at, at + stage.ms);
+}
+
+// ----- the dock's silhouette ------------------------------------------------
+//
+// It rises out of the bottom edge rather than growing in place: the surface is
+// anchored there, so a pill sitting below the edge is simply not on screen,
+// and the same curve that opens every other island carries it up.
+
+var shelfEmergeMs = shapeMs(420);
+var shelfRetractMs = shapeMs(300);
+// How fast the tiles a dragged one displaces get out of its way. Declared
+// here rather than with the row's geometry because `shapeMs` reads a tempo
+// that is assigned in this section: a `var` read above its own assignment is
+// undefined, and this would have come out NaN.
+var shelfSlideMs = shapeMs(240);
+
+// Delay before an unhovered dock goes away, so crossing the gap between the
+// reveal strip and the pill does not take it with you.
+var shelfGraceMs = 240;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1532,6 +1708,15 @@ function roundedRectPath(w, h, r, progress) {
         surfaceWidth: surfaceWidth,
         exclusiveZone: exclusiveZone,
         surfaceHeight: surfaceHeight,
+        shelfHeight: shelfHeight,
+        shelfSurfaceHeight: shelfSurfaceHeight,
+        shelfScheduleMs: shelfScheduleMs,
+        durShelfDraw: durShelfDraw,
+        durShelfUndraw: durShelfUndraw,
+        shelfSlideMs: shelfSlideMs,
+        shelfEmergeMs: shelfEmergeMs,
+        shelfRetractMs: shelfRetractMs,
+        shelfGraceMs: shelfGraceMs,
         durPeek: durPeek,
         durMenu: durMenu,
         dockEmergeMs: dockEmergeMs,
@@ -1668,7 +1853,12 @@ function roundedRectPath(w, h, r, progress) {
         drawMediaTitle: drawMediaTitle,
         drawMediaArtist: drawMediaArtist,
         drawMediaSeek: drawMediaSeek,
-        drawMediaControls: drawMediaControls
+        drawMediaControls: drawMediaControls,
+        drawShelfRule: drawShelfRule,
+        drawShelfFrame: drawShelfFrame,
+        drawShelfIcon: drawShelfIcon,
+        drawShelfMark: drawShelfMark,
+        drawShelfDivider: drawShelfDivider
     };
 
     function broken(value) {

@@ -132,6 +132,24 @@ COMPOSITOR.process.service("cliphist-image", {
 });
 ```
 
+## Dock
+
+Push the pointer to the bottom of the screen and the dock comes up: one square
+per application, and under them a rule carrying one mark per open window.
+
+| | |
+| --- | --- |
+| Left click | show the application, or start it if nothing is open; click again to step through its windows |
+| Middle click | open another window |
+| Right click | a menu: pin it, unpin it, start another window, or close it |
+| Drag | move a pinned application along the row |
+
+A pinned application stays in the row with nothing open, shown by a hollow
+mark; everything before the divider is pinned. Windows come from
+`zwlr_foreign_toplevel_management_v1` and are grouped by desktop entry, which
+is also what a pin is stored as, so a pin survives both a restart and the
+application's windows closing.
+
 ## Configuring
 
 Every number the shell is drawn from — sizes, spacing, colours, and the timing
