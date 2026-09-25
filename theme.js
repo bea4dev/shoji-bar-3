@@ -695,7 +695,7 @@ function shelfDividerX(count, split) {
 // ends up as bare text over whatever is behind it.
 // The ground the popup carries. `menuOpacity` is the knob; it must stay above
 // ShojiWM's popup-blur threshold or that blur is clipped away as well.
-var menuOpacity = 0.3;
+var menuOpacity = 0.35;
 var menuTint = withAlpha("121a26", menuOpacity);
 var menuItemHeight = 26;
 // Shared by the rows and by the measurement that sizes the popup, so the two
@@ -739,7 +739,7 @@ var surfaceHeight = screenPad + menuHeight + dockGap + lowerIslandHeight
 // ~/.config/shojiwm/src/island-glass.ts (currently 0.20 == 0x33). The
 // compositor recovers geometric coverage as alpha / surfaceOpacity; a mismatch
 // breaks the silhouette the glass is clipped to.
-var surfaceOpacity = 0.2;
+var surfaceOpacity = 0.35;
 // Derived, not restated: the two can no longer drift apart.
 var tint = withAlpha("1a2433", surfaceOpacity);
 
